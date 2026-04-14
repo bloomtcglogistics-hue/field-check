@@ -86,38 +86,83 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   toggleCheck: async (itemId, rfeId, checked, userName) => {
     const existing = get().checkStates.get(itemId)
 
-    const updated: CheckState = {
+    // Single timestamp used for BOTH the optimistic update and the DB write.
+    // This ensures the echo-guard (existing.updated_at >= payload.updated_at)
+    // correctly skips our own realtime echo — equal timestamps → skip.
+    const now = new Date().toISOString()
+
+    const optimistic: CheckState = {
       id: existing?.id ?? '',
       rfe_id: rfeId,
       item_id: itemId,
       checked,
       note: existing?.note ?? '',
-      checked_at: checked ? new Date().toISOString() : (existing?.checked_at ?? null),
+      checked_at: checked ? now : (existing?.checked_at ?? null),
       checked_by: checked ? userName : (existing?.checked_by ?? ''),
-      updated_at: new Date().toISOString(),
+      updated_at: now,
       qty_found: existing?.qty_found ?? null,
     }
+
+    // Apply optimistic update immediately
     const map = new Map(get().checkStates)
-    map.set(itemId, updated)
+    map.set(itemId, optimistic)
     set({ checkStates: map })
 
-    const { error } = await supabase.from('fc_check_state').upsert({
+    // Build upsert payload — NOTE: qty_found is intentionally omitted.
+    // Including qty_found when the column doesn't yet exist causes a 400 error
+    // that silently reverts the optimistic update. qty_found is managed exclusively
+    // by updateQtyFound(); omitting it here preserves any existing DB value.
+    const payload = {
       rfe_id: rfeId,
       item_id: itemId,
       checked,
       note: existing?.note ?? '',
-      checked_at: checked ? new Date().toISOString() : null,
+      checked_at: checked ? now : null,
       checked_by: checked ? userName : '',
-      updated_at: new Date().toISOString(),
-      qty_found: existing?.qty_found ?? null,
-    }, { onConflict: 'rfe_id,item_id' })
+      updated_at: now,
+    }
 
-    if (error) console.error('[toggleCheck]', error.message)
+    console.log('[toggleCheck] Upserting payload:', payload)
+
+    const { data, error } = await supabase
+      .from('fc_check_state')
+      .upsert(payload, { onConflict: 'rfe_id,item_id' })
+      .select()
+
+    console.log('[toggleCheck] Response — data:', data, 'error:', error)
+
+    if (error) {
+      console.error('[toggleCheck] UPSERT FAILED — reverting optimistic update.', error.message, '| details:', error.details, '| hint:', error.hint, '| code:', error.code)
+      // Roll back the optimistic update so the UI shows the true DB state
+      const revertMap = new Map(get().checkStates)
+      if (existing) {
+        revertMap.set(itemId, existing)
+      } else {
+        revertMap.delete(itemId)
+      }
+      set({ checkStates: revertMap })
+      return
+    }
+
+    // Verification SELECT — confirms the row is what we expect
+    const { data: verify, error: vErr } = await supabase
+      .from('fc_check_state')
+      .select('id, item_id, checked, updated_at')
+      .eq('item_id', itemId)
+      .eq('rfe_id', rfeId)
+      .single()
+
+    if (vErr) {
+      console.warn('[toggleCheck] Verify SELECT failed:', vErr.message)
+    } else {
+      console.log('[toggleCheck] Verify SELECT result:', verify)
+    }
   },
 
   // ── Save note on an item ──
   updateNote: async (itemId, rfeId, note) => {
     const existing = get().checkStates.get(itemId)
+    const now = new Date().toISOString()
 
     const map = new Map(get().checkStates)
     map.set(itemId, {
@@ -128,26 +173,31 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       note,
       checked_at: existing?.checked_at ?? null,
       checked_by: existing?.checked_by ?? '',
-      updated_at: new Date().toISOString(),
+      updated_at: now,
       qty_found: existing?.qty_found ?? null,
     })
     set({ checkStates: map })
 
-    await supabase.from('fc_check_state').upsert({
+    // qty_found intentionally omitted — see toggleCheck for rationale
+    const { error } = await supabase.from('fc_check_state').upsert({
       rfe_id: rfeId,
       item_id: itemId,
       checked: existing?.checked ?? false,
       note,
       checked_at: existing?.checked_at ?? null,
       checked_by: existing?.checked_by ?? '',
-      updated_at: new Date().toISOString(),
-      qty_found: existing?.qty_found ?? null,
+      updated_at: now,
     }, { onConflict: 'rfe_id,item_id' })
+
+    if (error) console.error('[updateNote]', error.message)
   },
 
   // ── Save qty_found on an item ──
+  // This is the ONLY mutation that writes qty_found to the DB.
+  // Requires the qty_found column to exist: ALTER TABLE fc_check_state ADD COLUMN IF NOT EXISTS qty_found integer DEFAULT NULL;
   updateQtyFound: async (itemId, rfeId, qtyFound) => {
     const existing = get().checkStates.get(itemId)
+    const now = new Date().toISOString()
 
     const map = new Map(get().checkStates)
     map.set(itemId, {
@@ -158,7 +208,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       note: existing?.note ?? '',
       checked_at: existing?.checked_at ?? null,
       checked_by: existing?.checked_by ?? '',
-      updated_at: new Date().toISOString(),
+      updated_at: now,
       qty_found: qtyFound,
     })
     set({ checkStates: map })
@@ -170,7 +220,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       note: existing?.note ?? '',
       checked_at: existing?.checked_at ?? null,
       checked_by: existing?.checked_by ?? '',
-      updated_at: new Date().toISOString(),
+      updated_at: now,
       qty_found: qtyFound,
     }, { onConflict: 'rfe_id,item_id' })
 
@@ -224,13 +274,17 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
   // ── Reset all check marks for an RFE ──
   resetChecks: async (rfeId) => {
-    await supabase.from('fc_check_state')
-      .update({ checked: false, checked_at: null, checked_by: '', note: '', qty_found: null })
+    // qty_found intentionally omitted — preserves qty data on reset, and avoids
+    // failure if the qty_found column hasn't been migrated yet
+    const { error } = await supabase.from('fc_check_state')
+      .update({ checked: false, checked_at: null, checked_by: '', note: '' })
       .eq('rfe_id', rfeId)
+
+    if (error) { console.error('[resetChecks]', error.message); return }
 
     const map = new Map<string, CheckState>()
     for (const [k, v] of get().checkStates) {
-      map.set(k, { ...v, checked: false, checked_at: null, checked_by: '', note: '', qty_found: null })
+      map.set(k, { ...v, checked: false, checked_at: null, checked_by: '', note: '' })
     }
     set({ checkStates: map })
   },
@@ -239,6 +293,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   selectAllFiltered: async (itemIds, rfeId, checked, userName) => {
     const now = new Date().toISOString()
 
+    // qty_found intentionally omitted — preserves existing qty values on bulk check
     const upserts = itemIds.map(itemId => ({
       rfe_id: rfeId,
       item_id: itemId,
@@ -247,27 +302,28 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       checked_at: checked ? now : null,
       checked_by: checked ? userName : '',
       updated_at: now,
-      qty_found: get().checkStates.get(itemId)?.qty_found ?? null,
     }))
 
     const map = new Map(get().checkStates)
     for (const u of upserts) {
+      const existing = get().checkStates.get(u.item_id)
       map.set(u.item_id, {
-        id: get().checkStates.get(u.item_id)?.id ?? '',
+        id: existing?.id ?? '',
+        qty_found: existing?.qty_found ?? null,
         ...u,
       })
     }
     set({ checkStates: map })
 
     for (let i = 0; i < upserts.length; i += 50) {
-      await supabase.from('fc_check_state')
+      const { error } = await supabase.from('fc_check_state')
         .upsert(upserts.slice(i, i + 50), { onConflict: 'rfe_id,item_id' })
+      if (error) console.error('[selectAllFiltered] batch error:', error.message)
     }
   },
 
   // ── Subscribe to real-time updates for the RFE list ──
   subscribeToRFEList: () => {
-    // Remove any existing fc_rfe_list channel to avoid stacking duplicates on remount
     const existing = get()._channels.filter(c => c.topic === 'realtime:fc_rfe_list')
     if (existing.length > 0) {
       console.log('[Realtime] Removing stale fc_rfe_list channel(s):', existing.length)
@@ -296,7 +352,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
   // ── Subscribe to real-time check_state updates for a specific RFE ──
   subscribeToRFE: (rfeId: string) => {
-    // Remove previous RFE-specific channels before creating a new one
     const prev = get()._channels.filter(c => c.topic.startsWith('realtime:fc_rfe_state_'))
     if (prev.length > 0) {
       console.log('[Realtime] Removing stale RFE channel(s):', prev.map(c => c.topic))
@@ -327,11 +382,12 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
             const s = payload.new as CheckState
             if (s.rfe_id !== rfeId) return
 
-            // Skip if local state is newer or equal — this is our own optimistic write
-            // echoing back from the server, or a genuinely stale event.
+            // Skip if local state is newer OR EQUAL — equal means this is our own
+            // optimistic write echoing back (we use the same `now` timestamp for
+            // both the optimistic update and the DB write, so they match exactly).
             const existing = get().checkStates.get(s.item_id)
             if (existing?.updated_at && existing.updated_at >= s.updated_at) {
-              console.log('[Realtime] Skipping stale/echo event for', s.item_id)
+              console.log('[Realtime] Skipping stale/echo event for', s.item_id, '— local:', existing.updated_at, 'remote:', s.updated_at)
               return
             }
 
