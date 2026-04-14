@@ -1,0 +1,283 @@
+import { create } from 'zustand'
+import { supabase } from '../lib/supabase'
+import type { RFEIndex, Item, CheckState, DisplayConfig } from '../types'
+import type { RealtimeChannel } from '@supabase/supabase-js'
+
+interface RealtimeState {
+  // Data
+  rfeList: RFEIndex[]
+  items: Item[]
+  checkStates: Map<string, CheckState>
+
+  // Loading / error
+  loading: boolean
+  importing: boolean
+  error: string | null
+
+  // CRUD actions
+  loadRFEList: () => Promise<void>
+  loadRFE: (rfeId: string) => Promise<void>
+  toggleCheck: (itemId: string, rfeId: string, checked: boolean, userName: string) => Promise<void>
+  updateNote: (itemId: string, rfeId: string, note: string) => Promise<void>
+  importRFE: (name: string, fileName: string, headers: string[], rows: Record<string, string>[], displayConfig: DisplayConfig) => Promise<string>
+  deleteRFE: (rfeId: string) => Promise<void>
+  resetChecks: (rfeId: string) => Promise<void>
+  selectAllFiltered: (itemIds: string[], rfeId: string, checked: boolean, userName: string) => Promise<void>
+
+  // Realtime subscriptions
+  subscribeToRFEList: () => void
+  subscribeToRFE: (rfeId: string) => void
+  unsubscribeAll: () => void
+
+  // Internal channel tracking
+  _channels: RealtimeChannel[]
+}
+
+const CHUNK = 100 // rows per Supabase insert batch
+
+export const useRealtimeStore = create<RealtimeState>((set, get) => ({
+  rfeList: [],
+  items: [],
+  checkStates: new Map(),
+  loading: false,
+  importing: false,
+  error: null,
+  _channels: [],
+
+  // ── Load list of all RFEs ──
+  loadRFEList: async () => {
+    set({ loading: true, error: null })
+    const { data, error } = await supabase
+      .from('fc_rfe_index')
+      .select('*')
+      .order('imported_at', { ascending: false })
+    if (error) { set({ error: error.message, loading: false }); return }
+    set({ rfeList: (data ?? []) as RFEIndex[], loading: false })
+  },
+
+  // ── Load all items + check states for a specific RFE ──
+  loadRFE: async (rfeId: string) => {
+    set({ loading: true, error: null, items: [], checkStates: new Map() })
+
+    const [{ data: items, error: iErr }, { data: states, error: sErr }] = await Promise.all([
+      supabase.from('fc_items').select('*').eq('rfe_id', rfeId).order('item_index'),
+      supabase.from('fc_check_state').select('*').eq('rfe_id', rfeId),
+    ])
+
+    if (iErr || sErr) {
+      set({ error: (iErr ?? sErr)!.message, loading: false })
+      return
+    }
+
+    const checkStates = new Map<string, CheckState>()
+    for (const s of (states ?? []) as CheckState[]) {
+      checkStates.set(s.item_id, s)
+    }
+
+    set({ items: (items ?? []) as Item[], checkStates, loading: false })
+  },
+
+  // ── Toggle a single item's checked status ──
+  toggleCheck: async (itemId, rfeId, checked, userName) => {
+    const existing = get().checkStates.get(itemId)
+
+    // Optimistic update
+    const updated: CheckState = {
+      id: existing?.id ?? '',
+      rfe_id: rfeId,
+      item_id: itemId,
+      checked,
+      note: existing?.note ?? '',
+      checked_at: checked ? new Date().toISOString() : (existing?.checked_at ?? null),
+      checked_by: checked ? userName : (existing?.checked_by ?? ''),
+      updated_at: new Date().toISOString(),
+    }
+    const map = new Map(get().checkStates)
+    map.set(itemId, updated)
+    set({ checkStates: map })
+
+    const { error } = await supabase.from('fc_check_state').upsert({
+      rfe_id: rfeId,
+      item_id: itemId,
+      checked,
+      note: existing?.note ?? '',
+      checked_at: checked ? new Date().toISOString() : null,
+      checked_by: checked ? userName : '',
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'rfe_id,item_id' })
+
+    if (error) console.error('[toggleCheck]', error.message)
+  },
+
+  // ── Save note on an item ──
+  updateNote: async (itemId, rfeId, note) => {
+    const existing = get().checkStates.get(itemId)
+
+    // Optimistic update
+    const map = new Map(get().checkStates)
+    map.set(itemId, {
+      id: existing?.id ?? '',
+      rfe_id: rfeId,
+      item_id: itemId,
+      checked: existing?.checked ?? false,
+      note,
+      checked_at: existing?.checked_at ?? null,
+      checked_by: existing?.checked_by ?? '',
+      updated_at: new Date().toISOString(),
+    })
+    set({ checkStates: map })
+
+    await supabase.from('fc_check_state').upsert({
+      rfe_id: rfeId,
+      item_id: itemId,
+      checked: existing?.checked ?? false,
+      note,
+      checked_at: existing?.checked_at ?? null,
+      checked_by: existing?.checked_by ?? '',
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'rfe_id,item_id' })
+  },
+
+  // ── Import a new RFE from parsed CSV/XLSX ──
+  importRFE: async (name, fileName, headers, rows, displayConfig) => {
+    set({ importing: true, error: null })
+
+    try {
+      // 1. Insert RFE index row
+      const { data: rfe, error: rfeErr } = await supabase
+        .from('fc_rfe_index')
+        .insert({ name, file_name: fileName, count: rows.length, headers, display_config: displayConfig })
+        .select()
+        .single()
+
+      if (rfeErr || !rfe) throw new Error(rfeErr?.message ?? 'Failed to create RFE index')
+
+      // 2. Batch-insert items
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const batch = rows.slice(i, i + CHUNK).map((data, j) => ({
+          rfe_id: rfe.id,
+          item_index: i + j,
+          data,
+        }))
+        const { error } = await supabase.from('fc_items').insert(batch)
+        if (error) throw new Error(`Batch ${i / CHUNK + 1} failed: ${error.message}`)
+      }
+
+      await get().loadRFEList()
+      set({ importing: false })
+      return rfe.id as string
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      set({ error: msg, importing: false })
+      throw err
+    }
+  },
+
+  // ── Delete an RFE (CASCADE removes items + check_state) ──
+  deleteRFE: async (rfeId) => {
+    await supabase.from('fc_rfe_index').delete().eq('id', rfeId)
+    set(state => ({
+      rfeList: state.rfeList.filter(r => r.id !== rfeId),
+      // Clear items/states if this was the active RFE
+      items: state.items.length > 0 && state.items[0].rfe_id === rfeId ? [] : state.items,
+      checkStates: state.items.length > 0 && state.items[0].rfe_id === rfeId
+        ? new Map()
+        : state.checkStates,
+    }))
+  },
+
+  // ── Reset all check marks for an RFE ──
+  resetChecks: async (rfeId) => {
+    await supabase.from('fc_check_state')
+      .update({ checked: false, checked_at: null, checked_by: '', note: '' })
+      .eq('rfe_id', rfeId)
+
+    // Refresh local state
+    const map = new Map<string, CheckState>()
+    for (const [k, v] of get().checkStates) {
+      map.set(k, { ...v, checked: false, checked_at: null, checked_by: '', note: '' })
+    }
+    set({ checkStates: map })
+  },
+
+  // ── Select/deselect all items in the current filtered view ──
+  selectAllFiltered: async (itemIds, rfeId, checked, userName) => {
+    const now = new Date().toISOString()
+
+    const upserts = itemIds.map(itemId => ({
+      rfe_id: rfeId,
+      item_id: itemId,
+      checked,
+      note: get().checkStates.get(itemId)?.note ?? '',
+      checked_at: checked ? now : null,
+      checked_by: checked ? userName : '',
+      updated_at: now,
+    }))
+
+    // Optimistic
+    const map = new Map(get().checkStates)
+    for (const u of upserts) {
+      map.set(u.item_id, {
+        id: get().checkStates.get(u.item_id)?.id ?? '',
+        ...u,
+      })
+    }
+    set({ checkStates: map })
+
+    // Persist in chunks of 50 (smaller for upsert)
+    for (let i = 0; i < upserts.length; i += 50) {
+      await supabase.from('fc_check_state')
+        .upsert(upserts.slice(i, i + 50), { onConflict: 'rfe_id,item_id' })
+    }
+  },
+
+  // ── Subscribe to real-time updates for the RFE list ──
+  subscribeToRFEList: () => {
+    const ch = supabase
+      .channel('fc_rfe_list')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fc_rfe_index' }, () => {
+        get().loadRFEList()
+      })
+      .subscribe()
+
+    set(state => ({ _channels: [...state._channels, ch] }))
+  },
+
+  // ── Subscribe to real-time check_state updates for a specific RFE ──
+  subscribeToRFE: (rfeId: string) => {
+    // Remove previous RFE-specific channel
+    const prev = get()._channels.filter(c => c.topic.startsWith('realtime:fc_rfe_state_'))
+    prev.forEach(c => supabase.removeChannel(c))
+
+    const ch = supabase
+      .channel(`fc_rfe_state_${rfeId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'fc_check_state', filter: `rfe_id=eq.${rfeId}` },
+        (payload) => {
+          const map = new Map(get().checkStates)
+          if (payload.eventType === 'DELETE') {
+            map.delete((payload.old as CheckState).item_id)
+          } else {
+            const s = payload.new as CheckState
+            map.set(s.item_id, s)
+          }
+          set({ checkStates: map })
+        }
+      )
+      .subscribe()
+
+    set(state => ({
+      _channels: [
+        ...state._channels.filter(c => !c.topic.startsWith('realtime:fc_rfe_state_')),
+        ch,
+      ],
+    }))
+  },
+
+  // ── Tear down all subscriptions ──
+  unsubscribeAll: () => {
+    get()._channels.forEach(ch => supabase.removeChannel(ch))
+    set({ _channels: [] })
+  },
+}))
