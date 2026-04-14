@@ -1,62 +1,110 @@
-// TCG Field Check — Service Worker v2.0
-// Vite build output caching strategy: cache-first for assets, network-first for API
+// TCG Field Check — Service Worker v3.0
+// Offline-first: cache shell, network-only for Supabase API
 
-const CACHE_NAME = 'fieldcheck-v2'
-const STATIC_ASSETS = [
+const CACHE_NAME = 'tcg-fieldcheck-v3'
+const APP_SHELL = [
   '/',
+  '/index.html',
   '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-192-maskable.png',
+  '/icon-512-maskable.png',
 ]
 
+// ── Install: precache app shell ───────────────────────────────────────────────
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then((cache) => {
+      // addAll fails if any resource 404s — use individual adds to be resilient
+      return Promise.allSettled(
+        APP_SHELL.map(url =>
+          cache.add(url).catch(err => console.warn('[SW] Could not precache:', url, err))
+        )
+      )
+    })
   )
   self.skipWaiting()
 })
 
+// ── Activate: delete old caches ───────────────────────────────────────────────
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter((k) => k !== CACHE_NAME)
+          .map((k) => {
+            console.log('[SW] Deleting old cache:', k)
+            return caches.delete(k)
+          })
+      )
     )
   )
   self.clients.claim()
 })
 
+// ── Fetch: per-resource strategies ───────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
 
-  // Never cache Supabase API calls
+  // Never intercept WebSocket connections (Supabase Realtime)
+  if (event.request.url.startsWith('wss://')) return
+
+  // Network-only: Supabase API calls — IndexedDB handles offline data
   if (url.hostname.endsWith('supabase.co')) return
 
-  // For navigation requests: network-first, fallback to cached /
+  // Navigation requests: network-first, fall back to cached /index.html
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() =>
-        caches.match('/').then((r) => r || fetch('/'))
+        caches.match('/index.html').then((r) => r || caches.match('/'))
       )
     )
     return
   }
 
-  // Cache-first for hashed Vite assets and fonts
+  // Google Fonts: cache-first with background network update
   if (
-    url.pathname.startsWith('/assets/') ||
     url.hostname === 'fonts.googleapis.com' ||
     url.hostname === 'fonts.gstatic.com'
   ) {
     event.respondWith(
-      caches.match(event.request).then(
-        (cached) => cached || fetch(event.request).then((res) => {
-          const clone = res.clone()
-          caches.open(CACHE_NAME).then((c) => c.put(event.request, clone))
-          return res
+      caches.open(CACHE_NAME).then((cache) =>
+        cache.match(event.request).then((cached) => {
+          const networkFetch = fetch(event.request).then((res) => {
+            cache.put(event.request, res.clone())
+            return res
+          }).catch(() => cached)
+          return cached || networkFetch
         })
       )
     )
     return
   }
 
-  // Default: network-first
-  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)))
+  // Same-origin static assets (Vite hashed JS/CSS/images/fonts): cache-first
+  if (
+    url.origin === self.location.origin && (
+      url.pathname.startsWith('/assets/') ||
+      url.pathname.match(/\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf)$/)
+    )
+  ) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        if (cached) return cached
+        return fetch(event.request).then((res) => {
+          const clone = res.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+          return res
+        })
+      })
+    )
+    return
+  }
+
+  // Default: network-first with cache fallback
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(event.request))
+  )
 })

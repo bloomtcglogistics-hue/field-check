@@ -2,10 +2,12 @@ import { useMemo, useState, useEffect } from 'react'
 import { FileX, Download } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
+import { getPendingItemIds } from '../stores/realtimeStore'
 import { generateHTMLReport, downloadReport } from '../lib/exportReport'
 import SearchBar from './SearchBar'
 import FilterBar from './FilterBar'
 import ItemCard from './ItemCard'
+import ConflictBanner from './ConflictBanner'
 import type { Item } from '../types'
 
 function NameModal({ onSave }: { onSave: (name: string) => void }) {
@@ -43,6 +45,19 @@ export default function ChecklistView() {
   const [toastVisible, setToastVisible] = useState(false)
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(new Set())
+
+  // Poll pending queue every 2s to drive pending-dot indicators on item cards
+  useEffect(() => {
+    let cancelled = false
+    const refresh = async () => {
+      const ids = await getPendingItemIds()
+      if (!cancelled) setPendingItemIds(ids)
+    }
+    refresh()
+    const timer = setInterval(refresh, 2000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [])
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
@@ -190,6 +205,9 @@ export default function ChecklistView() {
 
   return (
     <div className="view-container" style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* Offline conflict banner */}
+      <ConflictBanner />
+
       {/* Progress bar */}
       <div className="progress-section">
         <div className="progress-row">
@@ -279,6 +297,7 @@ export default function ChecklistView() {
                   displayConfig={currentRfe.display_config}
                   searchQuery={searchQuery}
                   onNeedName={() => setShowNameModal(true)}
+                  hasPendingMutation={pendingItemIds.has(item.id)}
                 />
               ))}
             </div>

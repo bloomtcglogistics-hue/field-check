@@ -1,10 +1,12 @@
 import { Settings } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
+import { useOnlineStatus } from '../lib/syncEngine'
 
 export default function TopBar() {
   const { activeTab, currentRfeId, setRightPanelOpen } = useAppStore()
   const { rfeList, items, checkStates, realtimeConnected } = useRealtimeStore()
+  const { isOnline, pendingCount } = useOnlineStatus()
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
@@ -36,13 +38,39 @@ export default function TopBar() {
       </div>
 
       <div className="topbar-right">
-        {/* Live indicator dot */}
-        {activeTab === 'checklist' && currentRfeId && (
-          <div
-            className={`live-dot ${realtimeConnected ? 'connected' : 'disconnected'}`}
-            title={realtimeConnected ? 'Live sync active' : 'Reconnecting…'}
-          />
-        )}
+        {/* Offline / online / sync status */}
+        {activeTab === 'checklist' && currentRfeId && (() => {
+          if (!isOnline && pendingCount > 0) {
+            return (
+              <div className="live-status offline" title={`Offline · ${pendingCount} pending`}>
+                <div className="live-dot offline" />
+                <span className="live-label">Offline · {pendingCount} pending</span>
+              </div>
+            )
+          }
+          if (!isOnline) {
+            return (
+              <div className="live-status offline" title="Offline">
+                <div className="live-dot offline" />
+                <span className="live-label">Offline</span>
+              </div>
+            )
+          }
+          if (pendingCount > 0) {
+            return (
+              <div className="live-status syncing" title={`Syncing ${pendingCount} item(s)…`}>
+                <div className="live-dot syncing" />
+                <span className="live-label">Syncing…</span>
+              </div>
+            )
+          }
+          return (
+            <div
+              className={`live-dot ${realtimeConnected ? 'connected' : 'disconnected'}`}
+              title={realtimeConnected ? 'Live sync active' : 'Reconnecting…'}
+            />
+          )
+        })()}
         <button
           className="topbar-icon-btn"
           onClick={() => setRightPanelOpen(true)}

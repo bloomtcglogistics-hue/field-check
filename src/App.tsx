@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useAppStore } from './stores/appStore'
 import { useRealtimeStore } from './stores/realtimeStore'
+import { initSyncEngine } from './lib/syncEngine'
 import TopBar from './components/TopBar'
 import BottomNav from './components/BottomNav'
 import SlidePanel from './components/SlidePanel'
@@ -20,6 +21,8 @@ export default function App() {
   }, [darkMode])
 
   useEffect(() => {
+    // Initialize offline sync engine (registers online/offline listeners, replays queue)
+    initSyncEngine()
     loadRFEList()
     subscribeToRFEList()
     return () => unsubscribeAll()

@@ -9,6 +9,7 @@ interface Props {
   displayConfig: DisplayConfig
   searchQuery: string
   onNeedName: () => void
+  hasPendingMutation?: boolean
 }
 
 /** Gold fuzzy highlight — wraps matching characters individually */
@@ -71,7 +72,7 @@ function isGridField(header: string): boolean {
   return GRID_FIELDS.some(g => n === g || n.includes(g))
 }
 
-export default function ItemCard({ item, displayConfig, searchQuery, onNeedName }: Props) {
+export default function ItemCard({ item, displayConfig, searchQuery, onNeedName, hasPendingMutation = false }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [noteValue, setNoteValue] = useState<string | null>(null)
   const [noteSaving, setNoteSaving] = useState(false)
@@ -152,18 +153,21 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName 
   return (
     <div className={`item-card${isChecked ? ' checked' : ''}`}>
       <div className="item-card-main">
-        {/* Custom 28px checkbox */}
-        <button
-          className={`item-checkbox${isChecked ? ' checked' : ''}`}
-          onClick={handleCheck}
-          aria-label={isChecked ? 'Uncheck item' : 'Check item'}
-        >
-          {isChecked && (
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M2.5 7L5.5 10L11.5 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
-        </button>
+        {/* Checkbox + optional pending dot */}
+        <div className="item-checkbox-wrap">
+          <button
+            className={`item-checkbox${isChecked ? ' checked' : ''}`}
+            onClick={handleCheck}
+            aria-label={isChecked ? 'Uncheck item' : 'Check item'}
+          >
+            {isChecked && (
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M2.5 7L5.5 10L11.5 4" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </button>
+          {hasPendingMutation && <span className="pending-dot" title="Pending sync" />}
+        </div>
 
         {/* Content */}
         <div className="item-content" onClick={handleCheck}>
