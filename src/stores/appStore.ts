@@ -25,10 +25,12 @@ interface AppState {
   resetFilter: () => void
 
   // Slide panels
-  leftPanelOpen: boolean
   rightPanelOpen: boolean
-  setLeftPanelOpen: (open: boolean) => void
   setRightPanelOpen: (open: boolean) => void
+
+  // Dark mode (persisted)
+  darkMode: boolean
+  toggleDarkMode: () => void
 }
 
 const defaultFilter: FilterState = {
@@ -36,6 +38,8 @@ const defaultFilter: FilterState = {
   statusFilter: 'all',
   sortMode: 'index',
   groupByEnabled: false,
+  sortColumn: null,
+  sortDir: 'asc',
 }
 
 export const useAppStore = create<AppState>()(
@@ -57,15 +61,15 @@ export const useAppStore = create<AppState>()(
       setFilter: (f) => set(state => ({ filter: { ...state.filter, ...f } })),
       resetFilter: () => set({ filter: defaultFilter, searchQuery: '' }),
 
-      leftPanelOpen: false,
       rightPanelOpen: false,
-      setLeftPanelOpen: (open) => set({ leftPanelOpen: open, rightPanelOpen: false }),
-      setRightPanelOpen: (open) => set({ rightPanelOpen: open, leftPanelOpen: false }),
+      setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
+
+      darkMode: false,
+      toggleDarkMode: () => set(state => ({ darkMode: !state.darkMode })),
     }),
     {
-      name: 'fieldcheck-app-v2',
-      // Only persist user identity — UI state resets on reload
-      partialize: (state) => ({ userName: state.userName }),
+      name: 'fieldcheck-app-v3',
+      partialize: (state) => ({ userName: state.userName, darkMode: state.darkMode }),
     }
   )
 )

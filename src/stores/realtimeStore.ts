@@ -14,11 +14,15 @@ interface RealtimeState {
   importing: boolean
   error: string | null
 
+  // Realtime connection status
+  realtimeConnected: boolean
+
   // CRUD actions
   loadRFEList: () => Promise<void>
   loadRFE: (rfeId: string) => Promise<void>
   toggleCheck: (itemId: string, rfeId: string, checked: boolean, userName: string) => Promise<void>
   updateNote: (itemId: string, rfeId: string, note: string) => Promise<void>
+  updateQtyFound: (itemId: string, rfeId: string, qtyFound: number | null) => Promise<void>
   importRFE: (name: string, fileName: string, headers: string[], rows: Record<string, string>[], displayConfig: DisplayConfig) => Promise<string>
   deleteRFE: (rfeId: string) => Promise<void>
   resetChecks: (rfeId: string) => Promise<void>
@@ -33,7 +37,7 @@ interface RealtimeState {
   _channels: RealtimeChannel[]
 }
 
-const CHUNK = 100 // rows per Supabase insert batch
+const CHUNK = 100
 
 export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   rfeList: [],
@@ -42,6 +46,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   loading: false,
   importing: false,
   error: null,
+  realtimeConnected: false,
   _channels: [],
 
   // ── Load list of all RFEs ──
@@ -81,7 +86,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   toggleCheck: async (itemId, rfeId, checked, userName) => {
     const existing = get().checkStates.get(itemId)
 
-    // Optimistic update
     const updated: CheckState = {
       id: existing?.id ?? '',
       rfe_id: rfeId,
@@ -91,6 +95,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       checked_at: checked ? new Date().toISOString() : (existing?.checked_at ?? null),
       checked_by: checked ? userName : (existing?.checked_by ?? ''),
       updated_at: new Date().toISOString(),
+      qty_found: existing?.qty_found ?? null,
     }
     const map = new Map(get().checkStates)
     map.set(itemId, updated)
@@ -104,6 +109,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       checked_at: checked ? new Date().toISOString() : null,
       checked_by: checked ? userName : '',
       updated_at: new Date().toISOString(),
+      qty_found: existing?.qty_found ?? null,
     }, { onConflict: 'rfe_id,item_id' })
 
     if (error) console.error('[toggleCheck]', error.message)
@@ -113,7 +119,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   updateNote: async (itemId, rfeId, note) => {
     const existing = get().checkStates.get(itemId)
 
-    // Optimistic update
     const map = new Map(get().checkStates)
     map.set(itemId, {
       id: existing?.id ?? '',
@@ -124,6 +129,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       checked_at: existing?.checked_at ?? null,
       checked_by: existing?.checked_by ?? '',
       updated_at: new Date().toISOString(),
+      qty_found: existing?.qty_found ?? null,
     })
     set({ checkStates: map })
 
@@ -135,7 +141,40 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       checked_at: existing?.checked_at ?? null,
       checked_by: existing?.checked_by ?? '',
       updated_at: new Date().toISOString(),
+      qty_found: existing?.qty_found ?? null,
     }, { onConflict: 'rfe_id,item_id' })
+  },
+
+  // ── Save qty_found on an item ──
+  updateQtyFound: async (itemId, rfeId, qtyFound) => {
+    const existing = get().checkStates.get(itemId)
+
+    const map = new Map(get().checkStates)
+    map.set(itemId, {
+      id: existing?.id ?? '',
+      rfe_id: rfeId,
+      item_id: itemId,
+      checked: existing?.checked ?? false,
+      note: existing?.note ?? '',
+      checked_at: existing?.checked_at ?? null,
+      checked_by: existing?.checked_by ?? '',
+      updated_at: new Date().toISOString(),
+      qty_found: qtyFound,
+    })
+    set({ checkStates: map })
+
+    const { error } = await supabase.from('fc_check_state').upsert({
+      rfe_id: rfeId,
+      item_id: itemId,
+      checked: existing?.checked ?? false,
+      note: existing?.note ?? '',
+      checked_at: existing?.checked_at ?? null,
+      checked_by: existing?.checked_by ?? '',
+      updated_at: new Date().toISOString(),
+      qty_found: qtyFound,
+    }, { onConflict: 'rfe_id,item_id' })
+
+    if (error) console.error('[updateQtyFound]', error.message)
   },
 
   // ── Import a new RFE from parsed CSV/XLSX ──
@@ -143,7 +182,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
     set({ importing: true, error: null })
 
     try {
-      // 1. Insert RFE index row
       const { data: rfe, error: rfeErr } = await supabase
         .from('fc_rfe_index')
         .insert({ name, file_name: fileName, count: rows.length, headers, display_config: displayConfig })
@@ -152,7 +190,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
       if (rfeErr || !rfe) throw new Error(rfeErr?.message ?? 'Failed to create RFE index')
 
-      // 2. Batch-insert items
       for (let i = 0; i < rows.length; i += CHUNK) {
         const batch = rows.slice(i, i + CHUNK).map((data, j) => ({
           rfe_id: rfe.id,
@@ -178,7 +215,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
     await supabase.from('fc_rfe_index').delete().eq('id', rfeId)
     set(state => ({
       rfeList: state.rfeList.filter(r => r.id !== rfeId),
-      // Clear items/states if this was the active RFE
       items: state.items.length > 0 && state.items[0].rfe_id === rfeId ? [] : state.items,
       checkStates: state.items.length > 0 && state.items[0].rfe_id === rfeId
         ? new Map()
@@ -189,13 +225,12 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   // ── Reset all check marks for an RFE ──
   resetChecks: async (rfeId) => {
     await supabase.from('fc_check_state')
-      .update({ checked: false, checked_at: null, checked_by: '', note: '' })
+      .update({ checked: false, checked_at: null, checked_by: '', note: '', qty_found: null })
       .eq('rfe_id', rfeId)
 
-    // Refresh local state
     const map = new Map<string, CheckState>()
     for (const [k, v] of get().checkStates) {
-      map.set(k, { ...v, checked: false, checked_at: null, checked_by: '', note: '' })
+      map.set(k, { ...v, checked: false, checked_at: null, checked_by: '', note: '', qty_found: null })
     }
     set({ checkStates: map })
   },
@@ -212,9 +247,9 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       checked_at: checked ? now : null,
       checked_by: checked ? userName : '',
       updated_at: now,
+      qty_found: get().checkStates.get(itemId)?.qty_found ?? null,
     }))
 
-    // Optimistic
     const map = new Map(get().checkStates)
     for (const u of upserts) {
       map.set(u.item_id, {
@@ -224,7 +259,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
     }
     set({ checkStates: map })
 
-    // Persist in chunks of 50 (smaller for upsert)
     for (let i = 0; i < upserts.length; i += 50) {
       await supabase.from('fc_check_state')
         .upsert(upserts.slice(i, i + 50), { onConflict: 'rfe_id,item_id' })
@@ -245,7 +279,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
   // ── Subscribe to real-time check_state updates for a specific RFE ──
   subscribeToRFE: (rfeId: string) => {
-    // Remove previous RFE-specific channel
+    // Remove previous RFE-specific channels
     const prev = get()._channels.filter(c => c.topic.startsWith('realtime:fc_rfe_state_'))
     prev.forEach(c => supabase.removeChannel(c))
 
@@ -265,7 +299,9 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
           set({ checkStates: map })
         }
       )
-      .subscribe()
+      .subscribe((status) => {
+        set({ realtimeConnected: status === 'SUBSCRIBED' })
+      })
 
     set(state => ({
       _channels: [
@@ -278,6 +314,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   // ── Tear down all subscriptions ──
   unsubscribeAll: () => {
     get()._channels.forEach(ch => supabase.removeChannel(ch))
-    set({ _channels: [] })
+    set({ _channels: [], realtimeConnected: false })
   },
 }))

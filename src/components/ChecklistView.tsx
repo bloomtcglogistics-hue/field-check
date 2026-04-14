@@ -8,7 +8,6 @@ import FilterBar from './FilterBar'
 import ItemCard from './ItemCard'
 import type { Item } from '../types'
 
-// ── Name prompt modal ──
 function NameModal({ onSave }: { onSave: (name: string) => void }) {
   const [value, setValue] = useState('')
   return (
@@ -37,21 +36,22 @@ function NameModal({ onSave }: { onSave: (name: string) => void }) {
 }
 
 export default function ChecklistView() {
-  const { currentRfeId, userName, setUserName, searchQuery, filter, setActiveTab } = useAppStore()
+  const { currentRfeId, userName, setUserName, searchQuery, filter, setFilter, setActiveTab } = useAppStore()
   const { rfeList, items, checkStates, loading, loadRFE, subscribeToRFE, selectAllFiltered } = useRealtimeStore()
   const [showNameModal, setShowNameModal] = useState(false)
   const [toastMsg, setToastMsg] = useState('')
   const [toastVisible, setToastVisible] = useState(false)
+  const [sortCol, setSortCol] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
-  // Load items whenever the selected RFE changes
   useEffect(() => {
     if (currentRfeId) {
       loadRFE(currentRfeId)
       subscribeToRFE(currentRfeId)
     }
-  }, [currentRfeId])
+  }, [currentRfeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const showToast = (msg: string) => {
     setToastMsg(msg)
@@ -59,7 +59,6 @@ export default function ChecklistView() {
     setTimeout(() => setToastVisible(false), 2200)
   }
 
-  // Derive unique group values from items
   const groups = useMemo(() => {
     if (!currentRfe?.display_config.grpName) return []
     const grpName = currentRfe.display_config.grpName
@@ -71,53 +70,57 @@ export default function ChecklistView() {
     return [...seen].sort()
   }, [items, currentRfe])
 
-  // Apply search + filters
   const filtered = useMemo((): Item[] => {
     let list = [...items]
     const q = searchQuery.toLowerCase().trim()
     const grpName = currentRfe?.display_config.grpName
 
-    // Search
     if (q) {
       list = list.filter(it =>
         Object.values(it.data).some(v => v.toLowerCase().includes(q))
       )
     }
 
-    // Status filter
     if (filter.statusFilter === 'checked') {
       list = list.filter(it => checkStates.get(it.id)?.checked)
     } else if (filter.statusFilter === 'unchecked') {
       list = list.filter(it => !checkStates.get(it.id)?.checked)
     }
 
-    // Group filter
     if (filter.groupByEnabled && filter.group && grpName) {
       list = list.filter(it => it.data[grpName] === filter.group)
     }
 
     // Sort
-    switch (filter.sortMode) {
-      case 'alpha': {
-        const descName = currentRfe?.display_config.descName ?? ''
-        list.sort((a, b) => (a.data[descName] ?? '').localeCompare(b.data[descName] ?? ''))
-        break
+    if (sortCol) {
+      list.sort((a, b) => {
+        const av = (a.data[sortCol] ?? '').toLowerCase()
+        const bv = (b.data[sortCol] ?? '').toLowerCase()
+        const cmp = av.localeCompare(bv)
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+    } else {
+      switch (filter.sortMode) {
+        case 'alpha': {
+          const descName = currentRfe?.display_config.descName ?? ''
+          list.sort((a, b) => (a.data[descName] ?? '').localeCompare(b.data[descName] ?? ''))
+          break
+        }
+        case 'status':
+          list.sort((a, b) => {
+            const ac = checkStates.get(a.id)?.checked ? 1 : 0
+            const bc = checkStates.get(b.id)?.checked ? 1 : 0
+            return ac - bc
+          })
+          break
+        default:
+          list.sort((a, b) => a.item_index - b.item_index)
       }
-      case 'status':
-        list.sort((a, b) => {
-          const ac = checkStates.get(a.id)?.checked ? 1 : 0
-          const bc = checkStates.get(b.id)?.checked ? 1 : 0
-          return ac - bc
-        })
-        break
-      default:
-        list.sort((a, b) => a.item_index - b.item_index)
     }
 
     return list
-  }, [items, searchQuery, filter, checkStates, currentRfe])
+  }, [items, searchQuery, filter, checkStates, currentRfe, sortCol, sortDir])
 
-  // Grouping
   const grouped = useMemo(() => {
     if (!filter.groupByEnabled || !currentRfe?.display_config.grpName) {
       return [{ group: null, items: filtered }]
@@ -132,7 +135,6 @@ export default function ChecklistView() {
     return [...map.entries()].map(([group, items]) => ({ group, items }))
   }, [filtered, filter.groupByEnabled, currentRfe])
 
-  // Stats
   const total = items.length
   const checkedCount = items.filter(it => checkStates.get(it.id)?.checked).length
   const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0
@@ -140,7 +142,23 @@ export default function ChecklistView() {
   const filteredChecked = filteredIds.filter(id => checkStates.get(id)?.checked).length
   const allFilteredChecked = filteredIds.length > 0 && filteredChecked === filteredIds.length
 
-  // No RFE selected
+  const handleSortCol = (col: string) => {
+    if (sortCol === col) {
+      if (sortDir === 'asc') setSortDir('desc')
+      else { setSortCol(null); setSortDir('asc') }
+    } else {
+      setSortCol(col)
+      setSortDir('asc')
+    }
+  }
+
+  // Column headers for sort — id + desc + up to 3 context cols
+  const sortHeaders = currentRfe ? [
+    currentRfe.display_config.idName,
+    currentRfe.display_config.descName,
+    ...currentRfe.display_config.ctxNames.slice(0, 3),
+  ].filter((h, i, arr) => h && arr.indexOf(h) === i) : []
+
   if (!currentRfeId || !currentRfe) {
     return (
       <div className="view-container">
@@ -172,10 +190,10 @@ export default function ChecklistView() {
 
   return (
     <div className="view-container" style={{ display: 'flex', flexDirection: 'column' }}>
-      {/* Progress */}
+      {/* Progress bar */}
       <div className="progress-section">
         <div className="progress-row">
-          <span className="progress-label">{checkedCount} of {total} verified</span>
+          <span className="progress-label">{checkedCount} / {total} items checked</span>
           <span className="progress-pct">{pct}%</span>
         </div>
         <div className="progress-track">
@@ -184,31 +202,61 @@ export default function ChecklistView() {
       </div>
 
       {/* Search */}
-      <SearchBar />
+      <SearchBar resultCount={filtered.length} totalCount={total} />
 
       {/* Filters */}
       <FilterBar groups={groups} />
 
-      {/* Select all bar */}
+      {/* Select All / Deselect All + sort headers */}
       {filtered.length > 0 && (
         <div className="select-bar">
-          <span className="select-bar-info">
-            {filtered.length} item{filtered.length !== 1 ? 's' : ''}
-            {searchQuery || filter.statusFilter !== 'all' ? ' (filtered)' : ''}
-          </span>
           <div className="select-bar-btns">
             <button
               className="select-btn"
               onClick={() => {
                 if (!userName) { setShowNameModal(true); return }
-                const target = !allFilteredChecked
-                selectAllFiltered(filteredIds, currentRfeId, !allFilteredChecked, userName)
-                showToast(allFilteredChecked ? 'Deselected all' : `Marked ${filteredIds.length} as found`)
+                selectAllFiltered(filteredIds, currentRfeId, true, userName)
+                showToast(`Marked ${filteredIds.length} as found`)
               }}
             >
-              {allFilteredChecked ? 'Deselect All' : 'Select All'}
+              Select All
+            </button>
+            <button
+              className="select-btn deselect"
+              onClick={() => {
+                if (!userName) { setShowNameModal(true); return }
+                selectAllFiltered(filteredIds, currentRfeId, false, userName)
+                showToast('Deselected all')
+              }}
+            >
+              Deselect All
             </button>
           </div>
+          <span className="select-bar-info">
+            {filteredChecked}/{filteredIds.length}
+          </span>
+        </div>
+      )}
+
+      {/* Column sort headers */}
+      {sortHeaders.length > 0 && (
+        <div className="sort-header-bar">
+          <span className="sort-header-label">Sort by:</span>
+          {sortHeaders.map(col => (
+            <button
+              key={col}
+              className={`sort-header-btn${sortCol === col ? ' active' : ''}`}
+              onClick={() => handleSortCol(col)}
+            >
+              {col}
+              {sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+            </button>
+          ))}
+          {sortCol && (
+            <button className="sort-header-clear" onClick={() => { setSortCol(null); setSortDir('asc') }}>
+              ✕
+            </button>
+          )}
         </div>
       )}
 
@@ -244,7 +292,7 @@ export default function ChecklistView() {
           className="fab fab-primary"
           title="Export report"
           onClick={() => {
-            const html = generateHTMLReport(currentRfe, items, checkStates)
+            const html = generateHTMLReport(currentRfe, items, checkStates, userName)
             downloadReport(html, currentRfe)
             showToast('Report downloaded')
           }}
@@ -253,7 +301,6 @@ export default function ChecklistView() {
         </button>
       </div>
 
-      {/* Name modal */}
       {showNameModal && (
         <NameModal
           onSave={name => {
@@ -263,7 +310,6 @@ export default function ChecklistView() {
         />
       )}
 
-      {/* Toast */}
       <div className={`toast${toastVisible ? ' visible' : ''}`}>{toastMsg}</div>
     </div>
   )

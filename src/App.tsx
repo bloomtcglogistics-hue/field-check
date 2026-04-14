@@ -11,8 +11,13 @@ import SettingsView from './components/SettingsView'
 import './App.css'
 
 export default function App() {
-  const { activeTab } = useAppStore()
+  const { activeTab, darkMode } = useAppStore()
   const { loadRFEList, subscribeToRFEList, unsubscribeAll } = useRealtimeStore()
+
+  // Apply dark mode to <html> element
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light')
+  }, [darkMode])
 
   useEffect(() => {
     loadRFEList()
@@ -23,15 +28,12 @@ export default function App() {
   return (
     <>
       <TopBar />
-
-      {/* Main content area — each view manages its own scroll */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {activeTab === 'checklist'  && <ChecklistView />}
         {activeTab === 'inventory'  && <InventoryView />}
         {activeTab === 'import'     && <ImportView />}
         {activeTab === 'settings'   && <SettingsView />}
       </div>
-
       <BottomNav />
       <SlidePanel />
     </>

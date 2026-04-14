@@ -33,6 +33,7 @@ export interface CheckState {
   checked_at: string | null
   checked_by: string
   updated_at: string
+  qty_found?: number | null
 }
 
 export type ViewTab = 'checklist' | 'inventory' | 'import' | 'settings'
@@ -44,4 +45,6 @@ export interface FilterState {
   statusFilter: 'all' | 'checked' | 'unchecked'
   sortMode: SortMode
   groupByEnabled: boolean
+  sortColumn: string | null
+  sortDir: 'asc' | 'desc'
 }

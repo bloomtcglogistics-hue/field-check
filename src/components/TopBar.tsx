@@ -1,10 +1,10 @@
-import { Menu, Settings } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 
 export default function TopBar() {
-  const { activeTab, currentRfeId, setLeftPanelOpen, setRightPanelOpen } = useAppStore()
-  const { rfeList, items, checkStates } = useRealtimeStore()
+  const { activeTab, currentRfeId, setRightPanelOpen } = useAppStore()
+  const { rfeList, items, checkStates, realtimeConnected } = useRealtimeStore()
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
@@ -17,33 +17,40 @@ export default function TopBar() {
       const checked = items.filter(it => checkStates.get(it.id)?.checked).length
       subtitle = `${checked} / ${items.length} verified`
     } else {
-      title = 'Checklist'
       subtitle = 'Select a list from Inventory'
     }
   } else if (activeTab === 'inventory') {
-    title = 'Inventory'
     subtitle = `${rfeList.length} list${rfeList.length !== 1 ? 's' : ''}`
   } else if (activeTab === 'import') {
-    title = 'Import List'
     subtitle = 'CSV or Excel file'
-  } else if (activeTab === 'settings') {
-    title = 'Settings'
   }
 
   return (
     <div className="topbar">
-      <button className="topbar-icon-btn" onClick={() => setLeftPanelOpen(true)} aria-label="Menu">
-        <Menu size={20} />
-      </button>
-
-      <div className="topbar-center">
-        <div className="topbar-title">{title}</div>
+      <div className="topbar-brand">
+        <div className="topbar-title">TCG Field Check</div>
         {subtitle && <div className="topbar-sub">{subtitle}</div>}
+        {activeTab === 'checklist' && currentRfe && title !== 'TCG Field Check' && (
+          <div className="topbar-context">{title}</div>
+        )}
       </div>
 
-      <button className="topbar-icon-btn" onClick={() => setRightPanelOpen(true)} aria-label="Settings">
-        <Settings size={20} />
-      </button>
+      <div className="topbar-right">
+        {/* Live indicator dot */}
+        {activeTab === 'checklist' && currentRfeId && (
+          <div
+            className={`live-dot ${realtimeConnected ? 'connected' : 'disconnected'}`}
+            title={realtimeConnected ? 'Live sync active' : 'Reconnecting…'}
+          />
+        )}
+        <button
+          className="topbar-icon-btn"
+          onClick={() => setRightPanelOpen(true)}
+          aria-label="Settings"
+        >
+          <Settings size={20} />
+        </button>
+      </div>
     </div>
   )
 }
