@@ -146,16 +146,22 @@ async function persistConflictNote(
     const prefix = buildConflictNote(localUser, conflict.remoteUser, conflict.remoteTimestamp)
     const newNote = prefix + stripped
 
+    // Bump updated_at so the other device's echo guard doesn't skip this UPDATE.
+    // Without this, the note-only write carries the same timestamp as the upsert
+    // that preceded it, and realtime subscribers with equal-or-newer local state
+    // drop the event before the conflict banner can be reconstructed.
+    const bumpedTimestamp = new Date().toISOString()
+
     const { error: updErr } = await supabase
       .from('fc_check_state')
-      .update({ note: newNote })
+      .update({ note: newNote, updated_at: bumpedTimestamp })
       .eq('item_id', itemId)
       .eq('rfe_id', rfeId)
 
     if (updErr) {
       console.warn('[Conflict] Failed to persist conflict note:', updErr.message)
     } else {
-      console.log('[Conflict] Persisted conflict note for item', itemId)
+      console.log('[Conflict] Persisted conflict note for item', itemId, 'at', bumpedTimestamp)
     }
   } catch (e) {
     console.warn('[Conflict] persistConflictNote threw:', e)

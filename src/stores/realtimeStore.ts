@@ -802,12 +802,37 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
               const s = payload.new as CheckState
               if (s.rfe_id !== rfeId) return
 
+              const existingForLog = get().checkStates.get(s.item_id)
+              console.log('[Realtime] RAW UPDATE received:', {
+                item_id: s.item_id,
+                note: s.note,
+                checked_by: s.checked_by,
+                updated_at: s.updated_at,
+                checked: s.checked,
+              })
+              console.log('[Realtime] Local state for this item:', {
+                updated_at: existingForLog?.updated_at,
+                checked_by: existingForLog?.checked_by,
+                note: existingForLog?.note,
+              })
+
+              const incomingIsConflict = !!s.note?.startsWith('CONFLICT:')
+              const localIsConflict = !!existingForLog?.note?.startsWith('CONFLICT:')
+              const alreadyInConflicts = get().conflicts.some(
+                c => c.itemId === s.item_id && c.rfeId === s.rfe_id,
+              )
+              console.log('[Realtime] Note check:', {
+                incomingIsConflict,
+                localIsConflict,
+                alreadyInConflicts,
+              })
+
               // Reliable fallback: if the incoming note carries a CONFLICT: prefix,
               // reconstruct the conflict locally. Catches devices that missed the
               // fire-and-forget broadcast.
-              if (s.note?.startsWith('CONFLICT:')) {
+              if (incomingIsConflict) {
                 applyConflictFromNote(s)
-              } else if (get().conflicts.some(c => c.itemId === s.item_id && c.rfeId === s.rfe_id)) {
+              } else if (alreadyInConflicts) {
                 // Dismissed on another device — mirror the clear locally.
                 console.log('[Conflict] Remote dismissal for item', s.item_id)
                 set(state => ({
@@ -817,12 +842,27 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
                 }))
               }
 
-              const existing = get().checkStates.get(s.item_id)
+              const existing = existingForLog
               const isResetEvent = s.checked === false && existing?.checked === true
+              // Special case: a conflict note arriving from another device must
+              // always win over the echo guard. Otherwise equal timestamps (from
+              // a bumped persistConflictNote write) can cause the local map to
+              // keep its stale non-conflict note, leaving the banner stuck off.
+              const isConflictArrival = incomingIsConflict && !localIsConflict
+              const willSkip =
+                !isResetEvent &&
+                !isConflictArrival &&
+                !!existing?.updated_at &&
+                existing.updated_at >= s.updated_at
+              console.log('[Realtime] Echo guard decision:', {
+                localUpdatedAt: existing?.updated_at,
+                remoteUpdatedAt: s.updated_at,
+                isResetEvent,
+                isConflictArrival,
+                willSkip,
+              })
 
-              if (!isResetEvent && existing?.updated_at && existing.updated_at >= s.updated_at) {
-                return
-              }
+              if (willSkip) return
 
               const map = new Map(get().checkStates)
               map.set(s.item_id, s)
