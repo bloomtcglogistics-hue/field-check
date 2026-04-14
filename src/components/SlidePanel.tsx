@@ -11,7 +11,7 @@ function RightPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <h2>Quick Settings</h2>
           <button
-            style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            style={{ background: 'var(--bg)', border: 'none', color: 'var(--text2)', borderRadius: '50%', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
             onClick={onClose}
             aria-label="Close"
           >

@@ -19,9 +19,9 @@ export default function RFECard({
   const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0
 
   let badge = 'incomplete'
-  let badgeLabel = 'Incomplete'
-  if (pct === 100) { badge = 'complete'; badgeLabel = 'Complete' }
-  else if (checkedCount > 0) { badge = 'partial'; badgeLabel = 'Partial' }
+  let badgeLabel = 'NOT STARTED'
+  if (pct === 100) { badge = 'complete'; badgeLabel = 'COMPLETE' }
+  else if (checkedCount > 0) { badge = 'partial'; badgeLabel = 'PARTIAL' }
 
   const date = new Date(rfe.imported_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
@@ -67,18 +67,17 @@ export default function RFECard({
       </div>
 
       <div className="rfe-card-actions">
+        <button
+          className="rfe-action-btn primary"
+          onClick={onSelect}
+        >
+          Open <ChevronRight size={14} />
+        </button>
         <button className="rfe-action-btn reset" onClick={handleReset}>
-          <RefreshCw size={14} /> Reset Checks
+          <RefreshCw size={14} /> Reset
         </button>
         <button className="rfe-action-btn danger" onClick={handleDelete}>
           <Trash2 size={14} /> Delete
-        </button>
-        <button
-          className="rfe-action-btn"
-          onClick={onSelect}
-          style={{ color: 'var(--green)', fontWeight: 700 }}
-        >
-          Open <ChevronRight size={14} />
         </button>
       </div>
     </div>

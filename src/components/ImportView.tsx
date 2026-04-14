@@ -113,21 +113,7 @@ export default function ImportView() {
 
         {/* Offline notice — parsing/preview still works, the Supabase write does not */}
         {showOfflineBanner && (
-          <div
-            role="status"
-            style={{
-              display: 'flex',
-              gap: 10,
-              alignItems: 'flex-start',
-              background: '#fff7ed',
-              border: '1px solid #fdba74',
-              color: '#9a3412',
-              padding: '12px 14px',
-              borderRadius: 10,
-              fontSize: 13,
-              lineHeight: 1.4,
-            }}
-          >
+          <div className="offline-banner" role="status">
             <WifiOff size={18} style={{ flexShrink: 0, marginTop: 1 }} />
             <div>
               <strong style={{ display: 'block', marginBottom: 2 }}>

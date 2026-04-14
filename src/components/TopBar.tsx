@@ -18,14 +18,12 @@ export default function TopBar() {
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
-  let title = 'TCG Field Check'
   let subtitle = ''
 
   if (activeTab === 'checklist') {
     if (currentRfe) {
-      title = currentRfe.name
       const checked = items.filter(it => checkStates.get(it.id)?.checked).length
-      subtitle = `${checked} / ${items.length} verified`
+      subtitle = `${currentRfe.name} · ${checked}/${items.length}`
     } else {
       subtitle = 'Select a list from Inventory'
     }
@@ -33,6 +31,8 @@ export default function TopBar() {
     subtitle = `${rfeList.length} list${rfeList.length !== 1 ? 's' : ''}`
   } else if (activeTab === 'import') {
     subtitle = 'CSV or Excel file'
+  } else if (activeTab === 'settings') {
+    subtitle = 'App preferences'
   }
 
   return (
@@ -40,9 +40,6 @@ export default function TopBar() {
       <div className="topbar-brand">
         <div className="topbar-title">TCG Field Check</div>
         {subtitle && <div className="topbar-sub">{subtitle}</div>}
-        {activeTab === 'checklist' && currentRfe && title !== 'TCG Field Check' && (
-          <div className="topbar-context">{title}</div>
-        )}
       </div>
 
       <div className="topbar-right" style={{ position: 'relative' }}>
