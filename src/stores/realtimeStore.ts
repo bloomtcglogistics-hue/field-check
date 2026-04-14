@@ -35,7 +35,6 @@ interface RealtimeState {
 
   // Internal channel tracking
   _channels: RealtimeChannel[]
-  _pollInterval: ReturnType<typeof setInterval> | null
 }
 
 const CHUNK = 100
@@ -49,7 +48,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   error: null,
   realtimeConnected: false,
   _channels: [],
-  _pollInterval: null,
 
   // ── Load list of all RFEs ──
   loadRFEList: async () => {
@@ -298,14 +296,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
   // ── Subscribe to real-time check_state updates for a specific RFE ──
   subscribeToRFE: (rfeId: string) => {
-    // Clear any existing poll interval from a previous RFE
-    const existingInterval = get()._pollInterval
-    if (existingInterval !== null) {
-      console.log('[Realtime] Clearing previous poll interval')
-      clearInterval(existingInterval)
-      set({ _pollInterval: null })
-    }
-
     // Remove previous RFE-specific channels before creating a new one
     const prev = get()._channels.filter(c => c.topic.startsWith('realtime:fc_rfe_state_'))
     if (prev.length > 0) {
@@ -328,7 +318,6 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
           if (payload.eventType === 'DELETE') {
             const deleted = payload.old as CheckState
-            // Ignore events for other RFEs
             if (deleted.rfe_id !== rfeId) return
             console.log('[Realtime] DELETE item_id:', deleted.item_id)
             const map = new Map(get().checkStates)
@@ -336,8 +325,16 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
             set({ checkStates: map })
           } else {
             const s = payload.new as CheckState
-            // Ignore events for other RFEs
             if (s.rfe_id !== rfeId) return
+
+            // Skip if local state is newer or equal — this is our own optimistic write
+            // echoing back from the server, or a genuinely stale event.
+            const existing = get().checkStates.get(s.item_id)
+            if (existing?.updated_at && existing.updated_at >= s.updated_at) {
+              console.log('[Realtime] Skipping stale/echo event for', s.item_id)
+              return
+            }
+
             console.log('[Realtime] INSERT/UPDATE item_id:', s.item_id, 'checked:', s.checked)
             const map = new Map(get().checkStates)
             map.set(s.item_id, s)
@@ -356,61 +353,12 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
         ch,
       ],
     }))
-
-    // ── Fallback polling every 5 s ──
-    // Guards against missed realtime events (network blips, cold connections, etc.)
-    const pollInterval = setInterval(async () => {
-      const { data, error } = await supabase
-        .from('fc_check_state')
-        .select('*')
-        .eq('rfe_id', rfeId)
-
-      if (error) {
-        console.warn('[Poll] fc_check_state fetch error:', error.message)
-        return
-      }
-
-      const remote = (data ?? []) as CheckState[]
-      const current = get().checkStates
-
-      // Check if anything differs before touching state
-      let hasChange = remote.length !== current.size
-      if (!hasChange) {
-        for (const row of remote) {
-          const local = current.get(row.item_id)
-          if (
-            !local ||
-            local.checked !== row.checked ||
-            local.note !== row.note ||
-            local.qty_found !== row.qty_found ||
-            local.updated_at !== row.updated_at
-          ) {
-            hasChange = true
-            break
-          }
-        }
-      }
-
-      if (hasChange) {
-        console.log('[Poll] Detected drift — updating checkStates from poll')
-        const map = new Map<string, CheckState>()
-        for (const row of remote) map.set(row.item_id, row)
-        set({ checkStates: map })
-      }
-    }, 5000)
-
-    set({ _pollInterval: pollInterval })
   },
 
-  // ── Tear down all subscriptions and timers ──
+  // ── Tear down all subscriptions ──
   unsubscribeAll: () => {
-    const interval = get()._pollInterval
-    if (interval !== null) {
-      console.log('[Realtime] Clearing poll interval')
-      clearInterval(interval)
-    }
     console.log('[Realtime] Unsubscribing all channels:', get()._channels.map(c => c.topic))
     get()._channels.forEach(ch => supabase.removeChannel(ch))
-    set({ _channels: [], realtimeConnected: false, _pollInterval: null })
+    set({ _channels: [], realtimeConnected: false })
   },
 }))
