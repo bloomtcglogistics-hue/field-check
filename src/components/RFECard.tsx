@@ -1,4 +1,4 @@
-import { Trash2, RefreshCw, ChevronRight } from 'lucide-react'
+import { Trash2, RefreshCw, ChevronRight, AlertTriangle } from 'lucide-react'
 import type { RFEIndex } from '../types'
 
 interface Props {
@@ -7,9 +7,14 @@ interface Props {
   onSelect: () => void
   onDelete: () => void
   onReset: () => void
+  hasConflicts?: boolean
+  conflictCount?: number
 }
 
-export default function RFECard({ rfe, checkedCount, onSelect, onDelete, onReset }: Props) {
+export default function RFECard({
+  rfe, checkedCount, onSelect, onDelete, onReset,
+  hasConflicts = false, conflictCount = 0,
+}: Props) {
   const total = rfe.count
   const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0
 
@@ -33,11 +38,19 @@ export default function RFECard({ rfe, checkedCount, onSelect, onDelete, onReset
   }
 
   return (
-    <div className="rfe-card">
+    <div className={`rfe-card${hasConflicts ? ' conflict' : ''}`}>
       <div className="rfe-card-body" onClick={onSelect}>
         <div className="rfe-card-top">
           <div className="rfe-name">{rfe.name}</div>
-          <span className={`rfe-badge ${badge}`}>{badgeLabel}</span>
+          <div className="rfe-badge-group">
+            {hasConflicts && (
+              <span className="rfe-badge conflict" title="Unresolved offline conflicts">
+                <AlertTriangle size={11} />
+                {conflictCount} {conflictCount === 1 ? 'CONFLICT' : 'CONFLICTS'}
+              </span>
+            )}
+            <span className={`rfe-badge ${badge}`}>{badgeLabel}</span>
+          </div>
         </div>
         <div className="rfe-meta">
           {total} items · {date} · {rfe.file_name}

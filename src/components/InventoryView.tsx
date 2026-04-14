@@ -98,6 +98,10 @@ function InventoryRFECardWrapper({
     return s.rfeCheckCounts.get(rfeId) ?? 0
   })
 
+  const conflictCount = useRealtimeStore(s =>
+    s.conflicts.filter(c => c.rfeId === rfeId).length,
+  )
+
   if (!rfe) return null
 
   return (
@@ -107,6 +111,8 @@ function InventoryRFECardWrapper({
       onSelect={onOpen}
       onDelete={onDelete}
       onReset={onReset}
+      hasConflicts={conflictCount > 0}
+      conflictCount={conflictCount}
     />
   )
 }

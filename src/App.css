@@ -699,6 +699,34 @@ mark {
 .rfe-badge.complete { background: var(--green-light); color: var(--green-dark); }
 .rfe-badge.partial { background: #fef3c7; color: #92400e; }
 .rfe-badge.incomplete { background: #fee2e2; color: #991b1b; }
+.rfe-badge-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.rfe-badge.conflict {
+  background: #F97316;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  letter-spacing: 0.04em;
+}
+[data-theme="dark"] .rfe-badge.conflict {
+  background: #FB923C;
+  color: #1c1917;
+}
+.rfe-card.conflict {
+  border-left: 4px solid #F97316;
+  background: #FFF7ED;
+}
+[data-theme="dark"] .rfe-card.conflict {
+  border-left-color: #FB923C;
+  background: #431407;
+}
 .rfe-meta { font-size: 12px; color: var(--text3); margin-top: 4px; }
 .rfe-progress { margin-top: 10px; }
 .rfe-card-actions {
