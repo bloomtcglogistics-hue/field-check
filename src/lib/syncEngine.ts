@@ -9,7 +9,13 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
 import { getQueue, dequeue, incrementRetries } from './offlineQueue'
-import { detectToggleConflict, formatItemDescription } from './conflictDetector'
+import {
+  detectToggleConflict,
+  formatItemDescription,
+  buildConflictNote,
+  stripConflictPrefix,
+} from './conflictDetector'
+import type { ConflictItem } from './conflictDetector'
 import { saveCheckStates, loadItems } from './offlineStore'
 import type { QueueEntry } from './offlineQueue'
 import type { Item, DisplayConfig, RFEIndex } from '../types'
@@ -110,6 +116,52 @@ async function replayEntry(entry: QueueEntry): Promise<'success' | 'network' | '
   }
 }
 
+/**
+ * Write the conflict prefix into fc_check_state.note so other devices see
+ * the conflict via realtime UPDATE events (or on next loadRFE). Preserves any
+ * user note by appending it after the " | " separator, and strips any prior
+ * CONFLICT prefix so repeat detections don't stack.
+ */
+async function persistConflictNote(
+  itemId: string,
+  rfeId: string,
+  localUser: string,
+  conflict: ConflictItem,
+): Promise<void> {
+  try {
+    const { data, error } = await supabase
+      .from('fc_check_state')
+      .select('note')
+      .eq('item_id', itemId)
+      .eq('rfe_id', rfeId)
+      .maybeSingle()
+
+    if (error) {
+      console.warn('[Conflict] Could not read note to persist conflict:', error.message)
+      return
+    }
+
+    const existing = (data?.note as string | null | undefined) ?? ''
+    const stripped = stripConflictPrefix(existing)
+    const prefix = buildConflictNote(localUser, conflict.remoteUser, conflict.remoteTimestamp)
+    const newNote = prefix + stripped
+
+    const { error: updErr } = await supabase
+      .from('fc_check_state')
+      .update({ note: newNote })
+      .eq('item_id', itemId)
+      .eq('rfe_id', rfeId)
+
+    if (updErr) {
+      console.warn('[Conflict] Failed to persist conflict note:', updErr.message)
+    } else {
+      console.log('[Conflict] Persisted conflict note for item', itemId)
+    }
+  } catch (e) {
+    console.warn('[Conflict] persistConflictNote threw:', e)
+  }
+}
+
 let replaying = false
 
 /** Replay all queued mutations, oldest first. Stops on first network error. */
@@ -149,6 +201,7 @@ export async function replayQueue(): Promise<void> {
     for (const entry of queue) {
       // Pre-upsert conflict detection for toggleCheck — must run BEFORE the
       // upsert or our own write clobbers the evidence of the other user's check.
+      let conflict: ConflictItem | null = null
       if (
         entry.type === 'toggleCheck' &&
         entry.itemId &&
@@ -157,7 +210,7 @@ export async function replayQueue(): Promise<void> {
       ) {
         const desc = await resolveDescription(entry.rfeId, entry.itemId)
 
-        const conflict = await detectToggleConflict(
+        conflict = await detectToggleConflict(
           entry.itemId,
           entry.rfeId,
           entry.userName,
@@ -183,6 +236,14 @@ export async function replayQueue(): Promise<void> {
       if (outcome === 'success') {
         await dequeue(entry.id)
         rfeIdsToReconcile.add(entry.rfeId)
+
+        // Persist the conflict to Supabase via the note field. Broadcasts are
+        // fire-and-forget; this write is the reliable fallback so any device —
+        // even one that missed the broadcast — sees the conflict on next load
+        // or via the realtime UPDATE event.
+        if (conflict && entry.itemId) {
+          await persistConflictNote(entry.itemId, entry.rfeId, entry.userName, conflict)
+        }
 
         if (entry.type === 'toggleCheck' && storeRef) {
           const states = storeRef.getCheckStates()

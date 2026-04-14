@@ -9,6 +9,7 @@ import {
 import { enqueue, getQueue } from '../lib/offlineQueue'
 import { registerStoreRef, replayQueue, isNetworkError, isNetworkStatus } from '../lib/syncEngine'
 import type { ConflictItem } from '../lib/conflictDetector'
+import { parseConflictNote, formatItemDescription } from '../lib/conflictDetector'
 import type { RFEIndex, Item, CheckState, DisplayConfig } from '../types'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
@@ -59,6 +60,36 @@ const CHUNK = 100
 export const useRealtimeStore = create<RealtimeState>((set, get) => {
   // Register store reference with sync engine so it can call loadRFE + addConflict
   // We do this lazily on first use via a helper at the bottom of this file.
+
+  /** If a row's note carries a CONFLICT: prefix, reconstruct a ConflictItem
+   *  from it and add to the store. Used by realtime UPDATEs and loadRFE scans. */
+  const applyConflictFromNote = (row: CheckState | undefined | null) => {
+    if (!row) return
+    const parsed = parseConflictNote(row.note)
+    if (!parsed) return
+    const existing = get().conflicts.some(c => c.itemId === row.item_id && c.rfeId === row.rfe_id)
+    if (existing) return
+    const item = get().items.find(i => i.id === row.item_id)
+    const rfe = get().rfeList.find(r => r.id === row.rfe_id)
+    const desc = formatItemDescription(item, rfe?.display_config, row.item_id)
+    console.log('[Conflict] Reconstructing from persisted note for item', row.item_id)
+    get().addConflict({
+      itemId: row.item_id,
+      rfeId: row.rfe_id,
+      localUser: parsed.remoteUser,
+      remoteUser: row.checked_by,
+      localTimestamp: parsed.remoteTimestamp,
+      remoteTimestamp: row.updated_at,
+      itemDescription: desc,
+    })
+  }
+
+  /** Scan all current checkStates for CONFLICT-marked notes. */
+  const scanCheckStatesForConflicts = () => {
+    for (const s of get().checkStates.values()) {
+      if (s.note?.startsWith('CONFLICT:')) applyConflictFromNote(s)
+    }
+  }
 
   return {
     rfeList: [],
@@ -161,6 +192,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
           checkStates: cachedStates ?? get().checkStates,
           loading: false,
         })
+        scanCheckStatesForConflicts()
       } else {
         const alreadyLoaded = get().items.length > 0 && get().items[0]?.rfe_id === rfeId
         set({ loading: !alreadyLoaded, error: null })
@@ -208,6 +240,9 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
 
         const itemList = (items ?? []) as Item[]
         set({ items: itemList, checkStates, loading: false })
+
+        // Scan merged state for persisted conflict markers
+        scanCheckStatesForConflicts()
 
         // Save merged state to IDB
         await Promise.all([
@@ -719,6 +754,11 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
             } else {
               const s = payload.new as CheckState
               if (s.rfe_id !== rfeId) return
+
+              // Reliable fallback: if the incoming note carries a CONFLICT: prefix,
+              // reconstruct the conflict locally. Catches devices that missed the
+              // fire-and-forget broadcast.
+              if (s.note?.startsWith('CONFLICT:')) applyConflictFromNote(s)
 
               const existing = get().checkStates.get(s.item_id)
               const isResetEvent = s.checked === false && existing?.checked === true

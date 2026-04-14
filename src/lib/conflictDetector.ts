@@ -20,6 +20,53 @@ export interface ConflictItem {
   itemDescription: string
 }
 
+// ─── Conflict note persistence (survives page reloads / missed broadcasts) ────
+// Format: "CONFLICT: Also checked by <user> at <shortTime> | <original note>"
+// Stored in fc_check_state.note so any device that loads the row — now or later —
+// can reconstruct the conflict banner via parseConflictNote().
+
+const CONFLICT_NOTE_RE = /^CONFLICT: Also checked by (.+?) at (.+?) \| ?([\s\S]*)$/
+
+function formatShortTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit',
+    })
+  } catch {
+    return iso
+  }
+}
+
+/** Build the conflict-note prefix. localUser is accepted for API symmetry but
+ *  isn't written into the note — the note describes the OTHER party. */
+export function buildConflictNote(
+  localUser: string,
+  remoteUser: string,
+  timestamp: string,
+): string {
+  void localUser
+  return `CONFLICT: Also checked by ${remoteUser} at ${formatShortTime(timestamp)} | `
+}
+
+/** Parse a stored conflict-note. Returns null if the note isn't a conflict marker. */
+export function parseConflictNote(
+  note: string | null | undefined,
+): { remoteUser: string; remoteTimestamp: string } | null {
+  if (!note || !note.startsWith('CONFLICT:')) return null
+  const m = note.match(CONFLICT_NOTE_RE)
+  if (!m) return null
+  return { remoteUser: m[1], remoteTimestamp: m[2] }
+}
+
+/** Remove a conflict prefix from a note (leaves plain user note). */
+export function stripConflictPrefix(note: string | null | undefined): string {
+  if (!note) return ''
+  if (!note.startsWith('CONFLICT:')) return note
+  const m = note.match(CONFLICT_NOTE_RE)
+  return m ? m[3] : note
+}
+
 /** Build a human-readable "80049718 - TELESCOPIC FORKLIFT" from an Item + DisplayConfig. */
 export function formatItemDescription(
   item: Item | undefined,
