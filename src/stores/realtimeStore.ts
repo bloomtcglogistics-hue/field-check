@@ -9,7 +9,7 @@ import {
 import { enqueue, getQueue } from '../lib/offlineQueue'
 import { registerStoreRef, replayQueue, isNetworkError, isNetworkStatus } from '../lib/syncEngine'
 import type { ConflictItem } from '../lib/conflictDetector'
-import { parseConflictNote, formatItemDescription } from '../lib/conflictDetector'
+import { parseConflictNote, formatItemDescription, stripConflictPrefix } from '../lib/conflictDetector'
 import type { RFEIndex, Item, CheckState, DisplayConfig } from '../types'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
@@ -91,6 +91,44 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
     }
   }
 
+  /** Strip the CONFLICT prefix from a row's note in Supabase. Fires a realtime
+   *  UPDATE that causes other devices to remove the conflict from their local
+   *  banner too. Runs fire-and-forget — callers already did the optimistic
+   *  local clear. */
+  const clearConflictNoteInSupabase = async (itemId: string, rfeId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('fc_check_state')
+        .select('note')
+        .eq('item_id', itemId)
+        .eq('rfe_id', rfeId)
+        .maybeSingle()
+
+      if (error) {
+        console.warn('[Conflict] Dismiss SELECT failed:', error.message)
+        return
+      }
+
+      const existing = (data?.note as string | null | undefined) ?? ''
+      if (!existing.startsWith('CONFLICT:')) return
+
+      const stripped = stripConflictPrefix(existing)
+      const { error: updErr } = await supabase
+        .from('fc_check_state')
+        .update({ note: stripped })
+        .eq('item_id', itemId)
+        .eq('rfe_id', rfeId)
+
+      if (updErr) {
+        console.warn('[Conflict] Dismiss UPDATE failed:', updErr.message)
+      } else {
+        console.log('[Conflict] Dismissed — stripped note for item', itemId)
+      }
+    } catch (e) {
+      console.warn('[Conflict] clearConflictNoteInSupabase threw:', e)
+    }
+  }
+
   return {
     rfeList: [],
     items: [],
@@ -113,9 +151,18 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
       })
     },
     clearConflict: (itemId) => {
+      // Optimistic local clear — user sees instant feedback
+      const target = get().conflicts.find(c => c.itemId === itemId)
       set(state => ({ conflicts: state.conflicts.filter(c => c.itemId !== itemId) }))
+      if (target) void clearConflictNoteInSupabase(target.itemId, target.rfeId)
     },
-    clearAllConflicts: () => set({ conflicts: [] }),
+    clearAllConflicts: () => {
+      const dismissed = get().conflicts
+      set({ conflicts: [] })
+      for (const c of dismissed) {
+        void clearConflictNoteInSupabase(c.itemId, c.rfeId)
+      }
+    },
     broadcastConflict: (c) => {
       const ch = get()._channels.find(x => x.topic === `realtime:fc_rfe_state_${c.rfeId}`)
       if (!ch) {
@@ -758,7 +805,17 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
               // Reliable fallback: if the incoming note carries a CONFLICT: prefix,
               // reconstruct the conflict locally. Catches devices that missed the
               // fire-and-forget broadcast.
-              if (s.note?.startsWith('CONFLICT:')) applyConflictFromNote(s)
+              if (s.note?.startsWith('CONFLICT:')) {
+                applyConflictFromNote(s)
+              } else if (get().conflicts.some(c => c.itemId === s.item_id && c.rfeId === s.rfe_id)) {
+                // Dismissed on another device — mirror the clear locally.
+                console.log('[Conflict] Remote dismissal for item', s.item_id)
+                set(state => ({
+                  conflicts: state.conflicts.filter(
+                    c => !(c.itemId === s.item_id && c.rfeId === s.rfe_id),
+                  ),
+                }))
+              }
 
               const existing = get().checkStates.get(s.item_id)
               const isResetEvent = s.checked === false && existing?.checked === true
