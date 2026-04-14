@@ -267,39 +267,71 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
   // ── Subscribe to real-time updates for the RFE list ──
   subscribeToRFEList: () => {
+    // Remove any existing fc_rfe_list channel to avoid stacking duplicates on remount
+    const existing = get()._channels.filter(c => c.topic === 'realtime:fc_rfe_list')
+    if (existing.length > 0) {
+      console.log('[Realtime] Removing stale fc_rfe_list channel(s):', existing.length)
+      existing.forEach(c => supabase.removeChannel(c))
+    }
+
+    console.log('[Realtime] Subscribing to fc_rfe_index (RFE list)')
+
     const ch = supabase
       .channel('fc_rfe_list')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'fc_rfe_index' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fc_rfe_index' }, (payload) => {
+        console.log('[Realtime] fc_rfe_index event:', payload.eventType, payload)
         get().loadRFEList()
       })
-      .subscribe()
+      .subscribe((status) => {
+        console.log('[Realtime] fc_rfe_list status:', status)
+      })
 
-    set(state => ({ _channels: [...state._channels, ch] }))
+    set(state => ({
+      _channels: [
+        ...state._channels.filter(c => c.topic !== 'realtime:fc_rfe_list'),
+        ch,
+      ],
+    }))
   },
 
   // ── Subscribe to real-time check_state updates for a specific RFE ──
   subscribeToRFE: (rfeId: string) => {
-    // Remove previous RFE-specific channels
+    // Remove previous RFE-specific channels before creating a new one
     const prev = get()._channels.filter(c => c.topic.startsWith('realtime:fc_rfe_state_'))
-    prev.forEach(c => supabase.removeChannel(c))
+    if (prev.length > 0) {
+      console.log('[Realtime] Removing stale RFE channel(s):', prev.map(c => c.topic))
+      prev.forEach(c => supabase.removeChannel(c))
+    }
+
+    console.log('[Realtime] Subscribing to fc_check_state for rfe_id:', rfeId)
 
     const ch = supabase
       .channel(`fc_rfe_state_${rfeId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'fc_check_state', filter: `rfe_id=eq.${rfeId}` },
+        {
+          event: '*',
+          schema: 'public',
+          table: 'fc_check_state',
+          filter: `rfe_id=eq.${rfeId}`,
+        },
         (payload) => {
+          console.log('[Realtime] fc_check_state event:', payload.eventType, 'payload:', payload)
           const map = new Map(get().checkStates)
           if (payload.eventType === 'DELETE') {
-            map.delete((payload.old as CheckState).item_id)
+            const deleted = payload.old as CheckState
+            console.log('[Realtime] DELETE item_id:', deleted.item_id)
+            map.delete(deleted.item_id)
           } else {
             const s = payload.new as CheckState
+            console.log('[Realtime] INSERT/UPDATE item_id:', s.item_id, 'checked:', s.checked)
             map.set(s.item_id, s)
           }
           set({ checkStates: map })
         }
       )
       .subscribe((status) => {
+        console.log('[Realtime] fc_rfe_state status:', status)
         set({ realtimeConnected: status === 'SUBSCRIBED' })
       })
 
@@ -313,6 +345,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
   // ── Tear down all subscriptions ──
   unsubscribeAll: () => {
+    console.log('[Realtime] Unsubscribing all channels:', get()._channels.map(c => c.topic))
     get()._channels.forEach(ch => supabase.removeChannel(ch))
     set({ _channels: [], realtimeConnected: false })
   },
