@@ -35,6 +35,7 @@ interface RealtimeState {
 
   // Internal channel tracking
   _channels: RealtimeChannel[]
+  _pollInterval: ReturnType<typeof setInterval> | null
 }
 
 const CHUNK = 100
@@ -48,6 +49,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   error: null,
   realtimeConnected: false,
   _channels: [],
+  _pollInterval: null,
 
   // ── Load list of all RFEs ──
   loadRFEList: async () => {
@@ -296,6 +298,14 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
   // ── Subscribe to real-time check_state updates for a specific RFE ──
   subscribeToRFE: (rfeId: string) => {
+    // Clear any existing poll interval from a previous RFE
+    const existingInterval = get()._pollInterval
+    if (existingInterval !== null) {
+      console.log('[Realtime] Clearing previous poll interval')
+      clearInterval(existingInterval)
+      set({ _pollInterval: null })
+    }
+
     // Remove previous RFE-specific channels before creating a new one
     const prev = get()._channels.filter(c => c.topic.startsWith('realtime:fc_rfe_state_'))
     if (prev.length > 0) {
@@ -303,31 +313,36 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       prev.forEach(c => supabase.removeChannel(c))
     }
 
-    console.log('[Realtime] Subscribing to fc_check_state for rfe_id:', rfeId)
+    console.log('[Realtime] Subscribing to fc_check_state (unfiltered) for rfe_id:', rfeId)
 
     const ch = supabase
       .channel(`fc_rfe_state_${rfeId}`)
       .on(
         'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'fc_check_state',
-          filter: `rfe_id=eq.${rfeId}`,
-        },
+        // No server-side filter — filtered subscriptions silently drop events in some
+        // Supabase Realtime configurations even with REPLICA IDENTITY FULL.
+        // We filter client-side instead.
+        { event: '*', schema: 'public', table: 'fc_check_state' },
         (payload) => {
           console.log('[Realtime] fc_check_state event:', payload.eventType, 'payload:', payload)
-          const map = new Map(get().checkStates)
+
           if (payload.eventType === 'DELETE') {
             const deleted = payload.old as CheckState
+            // Ignore events for other RFEs
+            if (deleted.rfe_id !== rfeId) return
             console.log('[Realtime] DELETE item_id:', deleted.item_id)
+            const map = new Map(get().checkStates)
             map.delete(deleted.item_id)
+            set({ checkStates: map })
           } else {
             const s = payload.new as CheckState
+            // Ignore events for other RFEs
+            if (s.rfe_id !== rfeId) return
             console.log('[Realtime] INSERT/UPDATE item_id:', s.item_id, 'checked:', s.checked)
+            const map = new Map(get().checkStates)
             map.set(s.item_id, s)
+            set({ checkStates: map })
           }
-          set({ checkStates: map })
         }
       )
       .subscribe((status) => {
@@ -341,12 +356,61 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
         ch,
       ],
     }))
+
+    // ── Fallback polling every 5 s ──
+    // Guards against missed realtime events (network blips, cold connections, etc.)
+    const pollInterval = setInterval(async () => {
+      const { data, error } = await supabase
+        .from('fc_check_state')
+        .select('*')
+        .eq('rfe_id', rfeId)
+
+      if (error) {
+        console.warn('[Poll] fc_check_state fetch error:', error.message)
+        return
+      }
+
+      const remote = (data ?? []) as CheckState[]
+      const current = get().checkStates
+
+      // Check if anything differs before touching state
+      let hasChange = remote.length !== current.size
+      if (!hasChange) {
+        for (const row of remote) {
+          const local = current.get(row.item_id)
+          if (
+            !local ||
+            local.checked !== row.checked ||
+            local.note !== row.note ||
+            local.qty_found !== row.qty_found ||
+            local.updated_at !== row.updated_at
+          ) {
+            hasChange = true
+            break
+          }
+        }
+      }
+
+      if (hasChange) {
+        console.log('[Poll] Detected drift — updating checkStates from poll')
+        const map = new Map<string, CheckState>()
+        for (const row of remote) map.set(row.item_id, row)
+        set({ checkStates: map })
+      }
+    }, 5000)
+
+    set({ _pollInterval: pollInterval })
   },
 
-  // ── Tear down all subscriptions ──
+  // ── Tear down all subscriptions and timers ──
   unsubscribeAll: () => {
+    const interval = get()._pollInterval
+    if (interval !== null) {
+      console.log('[Realtime] Clearing poll interval')
+      clearInterval(interval)
+    }
     console.log('[Realtime] Unsubscribing all channels:', get()._channels.map(c => c.topic))
     get()._channels.forEach(ch => supabase.removeChannel(ch))
-    set({ _channels: [], realtimeConnected: false })
+    set({ _channels: [], realtimeConnected: false, _pollInterval: null })
   },
 }))
