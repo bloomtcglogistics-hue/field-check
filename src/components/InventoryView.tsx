@@ -7,12 +7,6 @@ export default function InventoryView() {
   const { setActiveTab, setCurrentRfeId } = useAppStore()
   const { rfeList, loading, deleteRFE, resetChecks } = useRealtimeStore()
 
-  // We need per-RFE check counts. Since we only load check_state for the active RFE,
-  // we fetch summary counts from the fc_rfe_index.count. For full accuracy we'd need a
-  // separate query — but we cache live checked counts in a lightweight way below.
-  // Assumption: checkedCount is approximated until the RFE is opened.
-  // TODO: add a view or summary column to fc_rfe_index for fast count lookups.
-
   const handleOpen = (rfeId: string) => {
     setCurrentRfeId(rfeId)
     setActiveTab('checklist')
@@ -75,7 +69,8 @@ export default function InventoryView() {
   )
 }
 
-// Wrapper that reads per-RFE check count from Supabase on mount
+// Reactive wrapper: derives checkedCount from live Zustand state so inventory
+// cards update in real time when checks change (including resets).
 function InventoryRFECardWrapper({
   rfeId, onOpen, onDelete, onReset,
 }: {
@@ -84,35 +79,26 @@ function InventoryRFECardWrapper({
   onDelete: () => void
   onReset: () => void
 }) {
-  const { rfeList } = useRealtimeStore()
-  const rfe = rfeList.find(r => r.id === rfeId)!
+  const { currentRfeId } = useAppStore()
 
-  // We fetch the count lazily on first render and cache it in a simple module-level map.
-  // This avoids a full state store just for inventory counts.
-  const [checkedCount, setCheckedCount] = React.useState<number>(inventoryCounts.get(rfeId) ?? 0)
+  const rfe = useRealtimeStore(s => s.rfeList.find(r => r.id === rfeId)!)
 
-  React.useEffect(() => {
-    if (inventoryCounts.has(rfeId)) return
-    import('../lib/supabase').then(({ supabase }) => {
-      supabase
-        .from('fc_check_state')
-        .select('id', { count: 'exact', head: true })
-        .eq('rfe_id', rfeId)
-        .eq('checked', true)
-        .then(({ count }) => {
-          const c = count ?? 0
-          inventoryCounts.set(rfeId, c)
-          setCheckedCount(c)
-        })
-    })
-  }, [rfeId])
+  // For the currently-loaded RFE, compute count from the live checkStates map
+  // (updated by realtime events and optimistic toggles). For others, use the
+  // DB-fetched count map populated by loadRFEList and kept up to date on reset.
+  const checkedCount = useRealtimeStore(s => {
+    const loadedRfeId = s.items[0]?.rfe_id
+    if (rfeId === currentRfeId && rfeId === loadedRfeId) {
+      let count = 0
+      for (const cs of s.checkStates.values()) {
+        if (cs.checked) count++
+      }
+      return count
+    }
+    return s.rfeCheckCounts.get(rfeId) ?? 0
+  })
 
-  // Invalidate count after reset
-  const handleReset = () => {
-    inventoryCounts.delete(rfeId)
-    setCheckedCount(0)
-    onReset()
-  }
+  if (!rfe) return null
 
   return (
     <RFECard
@@ -120,13 +106,7 @@ function InventoryRFECardWrapper({
       checkedCount={checkedCount}
       onSelect={onOpen}
       onDelete={onDelete}
-      onReset={handleReset}
+      onReset={onReset}
     />
   )
 }
-
-// Module-level cache so counts persist across tab switches without a full store
-const inventoryCounts = new Map<string, number>()
-
-// Need React import for the wrapper component
-import React from 'react'

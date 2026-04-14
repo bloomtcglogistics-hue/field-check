@@ -8,6 +8,7 @@ interface RealtimeState {
   rfeList: RFEIndex[]
   items: Item[]
   checkStates: Map<string, CheckState>
+  rfeCheckCounts: Map<string, number> // checked count per rfe_id (for inventory cards)
 
   // Loading / error
   loading: boolean
@@ -43,26 +44,38 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
   rfeList: [],
   items: [],
   checkStates: new Map(),
+  rfeCheckCounts: new Map(),
   loading: false,
   importing: false,
   error: null,
   realtimeConnected: false,
   _channels: [],
 
-  // ── Load list of all RFEs ──
+  // ── Load list of all RFEs + checked counts for inventory cards ──
   loadRFEList: async () => {
     set({ loading: true, error: null })
-    const { data, error } = await supabase
-      .from('fc_rfe_index')
-      .select('*')
-      .order('imported_at', { ascending: false })
+
+    const [{ data, error }, { data: countData }] = await Promise.all([
+      supabase.from('fc_rfe_index').select('*').order('imported_at', { ascending: false }),
+      supabase.from('fc_check_state').select('rfe_id').eq('checked', true),
+    ])
+
     if (error) { set({ error: error.message, loading: false }); return }
-    set({ rfeList: (data ?? []) as RFEIndex[], loading: false })
+
+    const rfeCheckCounts = new Map<string, number>()
+    for (const row of (countData ?? [])) {
+      rfeCheckCounts.set(row.rfe_id, (rfeCheckCounts.get(row.rfe_id) ?? 0) + 1)
+    }
+
+    set({ rfeList: (data ?? []) as RFEIndex[], rfeCheckCounts, loading: false })
   },
 
   // ── Load all items + check states for a specific RFE ──
   loadRFE: async (rfeId: string) => {
-    set({ loading: true, error: null, items: [], checkStates: new Map() })
+    // Don't clear existing state eagerly — avoid flash if we already have data for this RFE
+    const currentItems = get().items
+    const alreadyLoaded = currentItems.length > 0 && currentItems[0]?.rfe_id === rfeId
+    set({ loading: !alreadyLoaded, error: null })
 
     const [{ data: items, error: iErr }, { data: states, error: sErr }] = await Promise.all([
       supabase.from('fc_items').select('*').eq('rfe_id', rfeId).order('item_index'),
@@ -74,9 +87,16 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
       return
     }
 
+    // Merge: keep local state if same or newer timestamp (preserves optimistic updates)
+    const existingStates = get().checkStates
     const checkStates = new Map<string, CheckState>()
     for (const s of (states ?? []) as CheckState[]) {
-      checkStates.set(s.item_id, s)
+      const local = existingStates.get(s.item_id)
+      if (local?.updated_at && local.updated_at >= s.updated_at) {
+        checkStates.set(s.item_id, local)
+      } else {
+        checkStates.set(s.item_id, s)
+      }
     }
 
     set({ items: (items ?? []) as Item[], checkStates, loading: false })
@@ -274,19 +294,33 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
 
   // ── Reset all check marks for an RFE ──
   resetChecks: async (rfeId) => {
+    const now = new Date().toISOString()
+
     // qty_found intentionally omitted — preserves qty data on reset, and avoids
-    // failure if the qty_found column hasn't been migrated yet
+    // failure if the qty_found column hasn't been migrated yet.
+    // updated_at IS included so realtime echo guard works correctly:
+    // local state gets the same timestamp → equal → skip own echo.
+    // Remote devices have older updated_at → event passes the guard → applied.
     const { error } = await supabase.from('fc_check_state')
-      .update({ checked: false, checked_at: null, checked_by: '', note: '' })
+      .update({ checked: false, checked_at: null, checked_by: '', note: '', updated_at: now })
       .eq('rfe_id', rfeId)
 
     if (error) { console.error('[resetChecks]', error.message); return }
 
-    const map = new Map<string, CheckState>()
-    for (const [k, v] of get().checkStates) {
-      map.set(k, { ...v, checked: false, checked_at: null, checked_by: '', note: '' })
+    // Update checkStates only if this RFE is currently loaded
+    const currentItems = get().items
+    if (currentItems.length > 0 && currentItems[0]?.rfe_id === rfeId) {
+      const map = new Map<string, CheckState>()
+      for (const [k, v] of get().checkStates) {
+        map.set(k, { ...v, checked: false, checked_at: null, checked_by: '', note: '', updated_at: now })
+      }
+      set({ checkStates: map })
     }
-    set({ checkStates: map })
+
+    // Always update inventory card count immediately
+    const counts = new Map(get().rfeCheckCounts)
+    counts.set(rfeId, 0)
+    set({ rfeCheckCounts: counts })
   },
 
   // ── Select/deselect all items in the current filtered view ──
@@ -371,6 +405,37 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
         (payload) => {
           console.log('[Realtime] fc_check_state event:', payload.eventType, 'payload:', payload)
 
+          // ── 1. Update rfeCheckCounts for ALL rfe_ids (drives inventory card counts) ──
+          // payload.old.checked is only populated when REPLICA IDENTITY FULL is set.
+          const oldRow = payload.old as Partial<CheckState>
+          const newRow = payload.new as Partial<CheckState>
+          const eventRfeId = newRow?.rfe_id ?? oldRow?.rfe_id
+
+          if (eventRfeId) {
+            const oldChecked = oldRow?.checked
+            const newChecked = newRow?.checked
+            const counts = new Map(get().rfeCheckCounts)
+            const cur = counts.get(eventRfeId) ?? 0
+
+            if (payload.eventType === 'INSERT' && newChecked) {
+              counts.set(eventRfeId, cur + 1)
+              set({ rfeCheckCounts: counts })
+            } else if (payload.eventType === 'UPDATE' && oldChecked !== undefined) {
+              // oldChecked is available only with REPLICA IDENTITY FULL
+              if (!oldChecked && newChecked) {
+                counts.set(eventRfeId, cur + 1)
+                set({ rfeCheckCounts: counts })
+              } else if (oldChecked && !newChecked) {
+                counts.set(eventRfeId, Math.max(0, cur - 1))
+                set({ rfeCheckCounts: counts })
+              }
+            } else if (payload.eventType === 'DELETE' && oldChecked) {
+              counts.set(eventRfeId, Math.max(0, cur - 1))
+              set({ rfeCheckCounts: counts })
+            }
+          }
+
+          // ── 2. Update checkStates for the active rfeId only ──
           if (payload.eventType === 'DELETE') {
             const deleted = payload.old as CheckState
             if (deleted.rfe_id !== rfeId) return
@@ -382,11 +447,17 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => ({
             const s = payload.new as CheckState
             if (s.rfe_id !== rfeId) return
 
-            // Skip if local state is newer OR EQUAL — equal means this is our own
-            // optimistic write echoing back (we use the same `now` timestamp for
-            // both the optimistic update and the DB write, so they match exactly).
             const existing = get().checkStates.get(s.item_id)
-            if (existing?.updated_at && existing.updated_at >= s.updated_at) {
+
+            // Special case: reset event — incoming unchecked, local checked.
+            // Always apply regardless of timestamp so resets from any device are
+            // never blocked by the echo guard (which guards against stale toggles,
+            // not intentional bulk resets).
+            const isResetEvent = s.checked === false && existing?.checked === true
+
+            // Skip if local state is newer OR EQUAL — equal means this is our own
+            // optimistic write echoing back (same `now` timestamp for both).
+            if (!isResetEvent && existing?.updated_at && existing.updated_at >= s.updated_at) {
               console.log('[Realtime] Skipping stale/echo event for', s.item_id, '— local:', existing.updated_at, 'remote:', s.updated_at)
               return
             }
