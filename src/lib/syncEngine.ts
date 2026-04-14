@@ -121,8 +121,37 @@ export async function replayQueue(): Promise<void> {
     console.log(`[syncEngine] Replaying ${queue.length} queued mutation(s)`)
 
     const rfeIdsToReconcile = new Set<string>()
+    let conflictCount = 0
 
     for (const entry of queue) {
+      // Pre-upsert conflict detection for toggleCheck — must run BEFORE the
+      // upsert or our own write clobbers the evidence of the other user's check.
+      if (
+        entry.type === 'toggleCheck' &&
+        entry.itemId &&
+        storeRef &&
+        (entry.payload as { checked?: boolean }).checked === true
+      ) {
+        const items = storeRef.getItems()
+        const item = items.find(i => i.id === entry.itemId)
+        const desc = item
+          ? (Object.values(item.data)[1] ?? Object.values(item.data)[0] ?? entry.itemId)
+          : entry.itemId
+
+        const conflict = await detectToggleConflict(
+          entry.itemId,
+          entry.rfeId,
+          entry.userName,
+          entry.timestamp,
+          String(desc),
+        )
+
+        if (conflict) {
+          storeRef.addConflict(conflict)
+          conflictCount++
+        }
+      }
+
       const outcome = await replayEntry(entry)
 
       if (outcome === 'network') {
@@ -135,35 +164,16 @@ export async function replayQueue(): Promise<void> {
         await dequeue(entry.id)
         rfeIdsToReconcile.add(entry.rfeId)
 
-        // Conflict detection for toggleCheck
-        if (entry.type === 'toggleCheck' && storeRef && entry.itemId) {
-          const items = storeRef.getItems()
-          const item = items.find(i => i.id === entry.itemId)
-          const desc = item
-            ? (Object.values(item.data)[1] ?? Object.values(item.data)[0] ?? entry.itemId)
-            : entry.itemId
-
-          const conflict = await detectToggleConflict(
-            entry.itemId,
-            entry.rfeId,
-            entry.userName,
-            entry.timestamp,
-            String(desc),
-          )
-
-          if (conflict) {
-            console.log('[syncEngine] Conflict detected for item:', entry.itemId)
-            storeRef.addConflict(conflict)
-          }
-
-          // Save confirmed state to IDB
-          if (storeRef) {
-            const states = storeRef.getCheckStates()
-            await saveCheckStates(entry.rfeId, states)
-          }
+        if (entry.type === 'toggleCheck' && storeRef) {
+          const states = storeRef.getCheckStates()
+          await saveCheckStates(entry.rfeId, states)
         }
       }
       // 'error' — mutation was discarded, continue with next
+    }
+
+    if (conflictCount > 0) {
+      console.log(`[Conflict] Replay complete. ${conflictCount} conflicts detected.`)
     }
 
     // Reconcile local state with server for affected RFEs
