@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
 import type { Item, DisplayConfig } from '../types'
@@ -10,6 +10,7 @@ interface Props {
   searchQuery: string
   onNeedName: () => void
   hasPendingMutation?: boolean
+  hasConflict?: boolean
 }
 
 /** Gold fuzzy highlight — wraps matching characters individually */
@@ -72,7 +73,7 @@ function isGridField(header: string): boolean {
   return GRID_FIELDS.some(g => n === g || n.includes(g))
 }
 
-export default function ItemCard({ item, displayConfig, searchQuery, onNeedName, hasPendingMutation = false }: Props) {
+export default function ItemCard({ item, displayConfig, searchQuery, onNeedName, hasPendingMutation = false, hasConflict = false }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [noteValue, setNoteValue] = useState<string | null>(null)
   const [noteSaving, setNoteSaving] = useState(false)
@@ -151,7 +152,13 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
     : null
 
   return (
-    <div className={`item-card${isChecked ? ' checked' : ''}`}>
+    <div className={`item-card${isChecked ? ' checked' : ''}${hasConflict ? ' conflict' : ''}`}>
+      {hasConflict && (
+        <div className="item-conflict-badge" title="Checked by multiple users while offline">
+          <AlertTriangle size={12} />
+          <span>CONFLICT</span>
+        </div>
+      )}
       <div className="item-card-main">
         {/* Checkbox + optional pending dot */}
         <div className="item-checkbox-wrap">

@@ -32,6 +32,7 @@ interface RealtimeState {
   addConflict: (c: ConflictItem) => void
   clearConflict: (itemId: string) => void
   clearAllConflicts: () => void
+  broadcastConflict: (c: ConflictItem) => void
 
   // CRUD actions
   loadRFEList: () => Promise<void>
@@ -84,6 +85,16 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
       set(state => ({ conflicts: state.conflicts.filter(c => c.itemId !== itemId) }))
     },
     clearAllConflicts: () => set({ conflicts: [] }),
+    broadcastConflict: (c) => {
+      const ch = get()._channels.find(x => x.topic === `realtime:fc_rfe_state_${c.rfeId}`)
+      if (!ch) {
+        console.warn('[Conflict] No broadcast channel for rfe', c.rfeId)
+        return
+      }
+      ch.send({ type: 'broadcast', event: 'conflict', payload: c })
+        .then(() => console.log('[Conflict] Broadcast sent for item', c.itemId))
+        .catch(err => console.warn('[Conflict] Broadcast failed:', err))
+    },
 
     // ── Load list of all RFEs ─────────────────────────────────────────────────
     loadRFEList: async () => {
@@ -657,7 +668,14 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
       }
 
       const ch = supabase
-        .channel(`fc_rfe_state_${rfeId}`)
+        .channel(`fc_rfe_state_${rfeId}`, { config: { broadcast: { self: false } } })
+        .on('broadcast', { event: 'conflict' }, ({ payload }) => {
+          const c = payload as ConflictItem
+          if (c && c.rfeId === rfeId) {
+            console.log('[Conflict] Broadcast received for item', c.itemId, 'from', c.localUser)
+            get().addConflict(c)
+          }
+        })
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'fc_check_state' },
@@ -751,8 +769,10 @@ registerStoreRef({
   loadRFE: (id) => useRealtimeStore.getState().loadRFE(id),
   loadRFEList: () => useRealtimeStore.getState().loadRFEList(),
   addConflict: (c) => useRealtimeStore.getState().addConflict(c),
+  broadcastConflict: (c) => useRealtimeStore.getState().broadcastConflict(c),
   getCheckStates: () => useRealtimeStore.getState().checkStates,
   getItems: () => useRealtimeStore.getState().items,
+  getRFEList: () => useRealtimeStore.getState().rfeList,
 })
 
 // Expose queue for pending-dot checks in ItemCard

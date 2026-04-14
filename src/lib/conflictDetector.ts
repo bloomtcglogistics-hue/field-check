@@ -8,7 +8,7 @@
  */
 
 import { supabase } from './supabase'
-import type { CheckState } from '../types'
+import type { CheckState, Item, DisplayConfig } from '../types'
 
 export interface ConflictItem {
   itemId: string
@@ -18,6 +18,20 @@ export interface ConflictItem {
   localTimestamp: string
   remoteTimestamp: string
   itemDescription: string
+}
+
+/** Build a human-readable "80049718 - TELESCOPIC FORKLIFT" from an Item + DisplayConfig. */
+export function formatItemDescription(
+  item: Item | undefined,
+  displayConfig: DisplayConfig | undefined,
+  fallback: string,
+): string {
+  if (!item || !displayConfig) return fallback
+  const id = item.data[displayConfig.idName]?.trim() || ''
+  const desc = item.data[displayConfig.descName]?.trim() || ''
+  const sameCol = displayConfig.idName === displayConfig.descName
+  if (id && desc && !sameCol) return `${id} - ${desc}`
+  return id || desc || fallback
 }
 
 /**

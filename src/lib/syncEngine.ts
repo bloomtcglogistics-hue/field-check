@@ -9,9 +9,10 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
 import { getQueue, dequeue, incrementRetries } from './offlineQueue'
-import { detectToggleConflict } from './conflictDetector'
-import { saveCheckStates } from './offlineStore'
+import { detectToggleConflict, formatItemDescription } from './conflictDetector'
+import { saveCheckStates, loadItems } from './offlineStore'
 import type { QueueEntry } from './offlineQueue'
+import type { Item, DisplayConfig, RFEIndex } from '../types'
 
 // We call into the store but import lazily to avoid circular deps at module init.
 // The store reference is set by initSyncEngine().
@@ -19,8 +20,10 @@ type StoreRef = {
   loadRFE: (id: string) => Promise<void>
   loadRFEList: () => Promise<void>
   addConflict: (c: import('./conflictDetector').ConflictItem) => void
+  broadcastConflict: (c: import('./conflictDetector').ConflictItem) => void
   getCheckStates: () => Map<string, import('../types').CheckState>
-  getItems: () => import('../types').Item[]
+  getItems: () => Item[]
+  getRFEList: () => RFEIndex[]
 }
 
 let storeRef: StoreRef | null = null
@@ -123,6 +126,26 @@ export async function replayQueue(): Promise<void> {
     const rfeIdsToReconcile = new Set<string>()
     let conflictCount = 0
 
+    // Cache items + display_config per rfe so we can format the item description
+    // even when the user hasn't opened this RFE in the current session (cold boot).
+    const itemsByRfe = new Map<string, Item[]>()
+    const configByRfe = new Map<string, DisplayConfig>()
+
+    const resolveDescription = async (rfeId: string, itemId: string): Promise<string> => {
+      if (!storeRef) return itemId
+      if (!itemsByRfe.has(rfeId)) {
+        const inMem = storeRef.getItems().filter(i => i.rfe_id === rfeId)
+        const items = inMem.length > 0 ? inMem : ((await loadItems(rfeId)) ?? [])
+        itemsByRfe.set(rfeId, items)
+      }
+      if (!configByRfe.has(rfeId)) {
+        const rfe = storeRef.getRFEList().find(r => r.id === rfeId)
+        if (rfe?.display_config) configByRfe.set(rfeId, rfe.display_config)
+      }
+      const item = itemsByRfe.get(rfeId)!.find(i => i.id === itemId)
+      return formatItemDescription(item, configByRfe.get(rfeId), itemId)
+    }
+
     for (const entry of queue) {
       // Pre-upsert conflict detection for toggleCheck — must run BEFORE the
       // upsert or our own write clobbers the evidence of the other user's check.
@@ -132,22 +155,19 @@ export async function replayQueue(): Promise<void> {
         storeRef &&
         (entry.payload as { checked?: boolean }).checked === true
       ) {
-        const items = storeRef.getItems()
-        const item = items.find(i => i.id === entry.itemId)
-        const desc = item
-          ? (Object.values(item.data)[1] ?? Object.values(item.data)[0] ?? entry.itemId)
-          : entry.itemId
+        const desc = await resolveDescription(entry.rfeId, entry.itemId)
 
         const conflict = await detectToggleConflict(
           entry.itemId,
           entry.rfeId,
           entry.userName,
           entry.timestamp,
-          String(desc),
+          desc,
         )
 
         if (conflict) {
           storeRef.addConflict(conflict)
+          storeRef.broadcastConflict(conflict)
           conflictCount++
         }
       }

@@ -39,7 +39,8 @@ function NameModal({ onSave }: { onSave: (name: string) => void }) {
 
 export default function ChecklistView() {
   const { currentRfeId, userName, setUserName, searchQuery, filter, setFilter, setActiveTab } = useAppStore()
-  const { rfeList, items, checkStates, loading, loadRFE, subscribeToRFE, selectAllFiltered } = useRealtimeStore()
+  const { rfeList, items, checkStates, loading, loadRFE, subscribeToRFE, selectAllFiltered, conflicts } = useRealtimeStore()
+  const conflictItemIds = useMemo(() => new Set(conflicts.map(c => c.itemId)), [conflicts])
   const [showNameModal, setShowNameModal] = useState(false)
   const [toastMsg, setToastMsg] = useState('')
   const [toastVisible, setToastVisible] = useState(false)
@@ -298,6 +299,7 @@ export default function ChecklistView() {
                   searchQuery={searchQuery}
                   onNeedName={() => setShowNameModal(true)}
                   hasPendingMutation={pendingItemIds.has(item.id)}
+                  hasConflict={conflictItemIds.has(item.id)}
                 />
               ))}
             </div>

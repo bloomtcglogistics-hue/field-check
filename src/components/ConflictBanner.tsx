@@ -41,12 +41,11 @@ export default function ConflictBanner() {
         <div className="conflict-list">
           {conflicts.map(c => (
             <div key={c.itemId} className="conflict-item">
-              <div className="conflict-item-desc">{c.itemDescription}</div>
-              <div className="conflict-item-detail">
-                <span>{c.localUser}</span>
-                <span className="conflict-sep"> &amp; </span>
-                <span>{c.remoteUser}</span>
-                <span className="conflict-sep"> both checked this item</span>
+              <div className="conflict-item-body">
+                <div className="conflict-item-desc">{c.itemDescription}</div>
+                <div className="conflict-item-detail">
+                  {c.localUser} &amp; {c.remoteUser} both checked this item
+                </div>
               </div>
               <button
                 className="conflict-dismiss"

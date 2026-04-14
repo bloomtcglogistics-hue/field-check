@@ -437,6 +437,46 @@ input, textarea {
   background: #052e16;
 }
 
+/* ── Conflicted item highlight ── */
+.item-card.conflict {
+  border-left: 4px solid #F97316;
+  background: #FFF7ED;
+  position: relative;
+}
+.item-card.conflict.checked {
+  background: #FFF7ED;
+  border-color: #F97316;
+  border-left-color: #F97316;
+}
+[data-theme="dark"] .item-card.conflict {
+  border-left-color: #FB923C;
+  background: #431407;
+}
+[data-theme="dark"] .item-card.conflict.checked {
+  background: #431407;
+  border-color: #FB923C;
+}
+.item-conflict-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: #F97316;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  z-index: 1;
+}
+[data-theme="dark"] .item-conflict-badge {
+  background: #FB923C;
+  color: #1c1917;
+}
+
 .item-card-main {
   display: flex;
   align-items: center;
@@ -940,16 +980,23 @@ mark {
 }
 .conflict-item:last-child { border-bottom: none; }
 [data-theme="dark"] .conflict-item { border-color: #422006; }
+.conflict-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
 .conflict-item-desc {
   font-size: 13px;
   font-weight: 600;
   color: var(--text);
-  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .conflict-item-detail {
   font-size: 12px;
   color: var(--text3);
-  flex: 2;
   line-height: 1.4;
 }
 .conflict-sep { color: var(--text3); }
