@@ -1,9 +1,13 @@
 import { useState, useRef, useCallback } from 'react'
-import { Upload, FileText, Check } from 'lucide-react'
+import { Upload, FileText, Check, WifiOff } from 'lucide-react'
 import { parseFile, type ParsedFile } from '../lib/fileParser'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
+import { useOnlineStatus } from '../lib/useOnlineStatus'
 import ColumnPreview from './ColumnPreview'
+
+const OFFLINE_MSG =
+  'You are currently offline. Importing new lists requires an internet connection. Please move to an area with signal and try again.'
 
 type Stage = 'idle' | 'preview' | 'importing' | 'done'
 
@@ -17,6 +21,8 @@ export default function ImportView() {
 
   const { importRFE, importing, error: storeError } = useRealtimeStore()
   const { setCurrentRfeId, setActiveTab } = useAppStore()
+  const { isOnline } = useOnlineStatus()
+  const [offlineNotice, setOfflineNotice] = useState('')
 
   const handleFile = useCallback(async (file: File) => {
     setParseError('')
@@ -46,6 +52,14 @@ export default function ImportView() {
 
   const handleImport = async () => {
     if (!parsed || !listName.trim()) return
+    // Double-check connectivity right before the network call. Parsing and
+    // preview work offline, but the actual multi-table insert requires Supabase.
+    if (!navigator.onLine) {
+      console.log('[Import] Blocked — device is offline')
+      setOfflineNotice(OFFLINE_MSG)
+      return
+    }
+    setOfflineNotice('')
     setStage('importing')
     try {
       const rfeId = await importRFE(
@@ -63,7 +77,8 @@ export default function ImportView() {
         setStage('idle')
         setParsed(null)
       }, 1200)
-    } catch {
+    } catch (err) {
+      console.log('[Import] Failed:', err)
       setStage('preview') // error shown via storeError
     }
   }
@@ -90,9 +105,39 @@ export default function ImportView() {
     )
   }
 
+  const showOfflineBanner = !isOnline || !!offlineNotice
+
   return (
     <div className="view-container" style={{ overflowY: 'auto' }}>
       <div className="import-container">
+
+        {/* Offline notice — parsing/preview still works, the Supabase write does not */}
+        {showOfflineBanner && (
+          <div
+            role="status"
+            style={{
+              display: 'flex',
+              gap: 10,
+              alignItems: 'flex-start',
+              background: '#fff7ed',
+              border: '1px solid #fdba74',
+              color: '#9a3412',
+              padding: '12px 14px',
+              borderRadius: 10,
+              fontSize: 13,
+              lineHeight: 1.4,
+            }}
+          >
+            <WifiOff size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+            <div>
+              <strong style={{ display: 'block', marginBottom: 2 }}>
+                Offline — import unavailable
+              </strong>
+              {offlineNotice || OFFLINE_MSG}
+              {parsed && ' Your file selection is kept — tap Import again when you\u2019re back online.'}
+            </div>
+          </div>
+        )}
 
         {/* Drop zone */}
         <div

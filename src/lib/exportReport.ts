@@ -66,7 +66,7 @@ export function generateHTMLReport(
     '<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet">',
     '<style>',
     '*{box-sizing:border-box;margin:0;padding:0}',
-    "body{font-family:'DM Sans',Arial,sans-serif;padding:24px;color:#111827;background:#f3f4f6}",
+    "body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;padding:24px;color:#111827;background:#f3f4f6}",
     '.header{background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;padding:24px 28px;border-radius:12px;margin-bottom:20px}',
     '.header h1{font-size:22px;font-weight:700;margin-bottom:4px}',
     '.header p{font-size:13px;opacity:.85;margin-top:3px}',

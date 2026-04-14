@@ -6,7 +6,7 @@ import {
   saveCheckStates, loadCheckStates,
   clearRFECache,
 } from '../lib/offlineStore'
-import { enqueue, getQueue } from '../lib/offlineQueue'
+import { enqueue, getQueue, getQueueCount, subscribeToQueueChanges } from '../lib/offlineQueue'
 import { registerStoreRef, replayQueue, isNetworkError, isNetworkStatus } from '../lib/syncEngine'
 import type { ConflictItem } from '../lib/conflictDetector'
 import { parseConflictNote, formatItemDescription, stripConflictPrefix } from '../lib/conflictDetector'
@@ -27,6 +27,11 @@ interface RealtimeState {
 
   // Realtime connection status
   realtimeConnected: boolean
+
+  // Pending queue state (reactive)
+  pendingCount: number
+  pendingItemIds: Set<string>
+  updatePendingCount: () => Promise<void>
 
   // Offline conflicts
   conflicts: ConflictItem[]
@@ -56,6 +61,17 @@ interface RealtimeState {
 }
 
 const CHUNK = 100
+
+// Safety-net reconnection timer for the check-state channel.
+// The Supabase client attempts reconnects internally, but we add a 10s
+// watchdog so a stuck CLOSED/TIMED_OUT state still gets retried.
+let rfeReconnectTimer: ReturnType<typeof setInterval> | null = null
+function clearRfeReconnectTimer(): void {
+  if (rfeReconnectTimer) {
+    clearInterval(rfeReconnectTimer)
+    rfeReconnectTimer = null
+  }
+}
 
 export const useRealtimeStore = create<RealtimeState>((set, get) => {
   // Register store reference with sync engine so it can call loadRFE + addConflict
@@ -138,8 +154,24 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
     importing: false,
     error: null,
     realtimeConnected: false,
+    pendingCount: 0,
+    pendingItemIds: new Set<string>(),
     conflicts: [],
     _channels: [],
+
+    // ── Reactive queue status ─────────────────────────────────────────────────
+    updatePendingCount: async () => {
+      try {
+        const queue = await getQueue()
+        const ids = new Set<string>()
+        for (const entry of queue) {
+          if (entry.itemId) ids.add(entry.itemId)
+        }
+        set({ pendingCount: queue.length, pendingItemIds: ids })
+      } catch (e) {
+        console.warn('[Queue] updatePendingCount failed:', e)
+      }
+    },
 
     // ── Conflict management ──────────────────────────────────────────────────
     addConflict: (c) => {
@@ -876,12 +908,36 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
           const connected = status === 'SUBSCRIBED'
           set({ realtimeConnected: connected })
 
-          // On reconnect, replay any queued mutations
           if (connected) {
+            // Clean recovery — kill the watchdog and replay queued mutations
+            clearRfeReconnectTimer()
             replayQueue()
+            // Also refresh check states in case any UPDATE events were missed
+            // while the channel was down
+            if (navigator.onLine) {
+              get().loadRFE(rfeId).catch(() => { /* best-effort */ })
+            }
+          } else if (
+            status === 'CLOSED' ||
+            status === 'CHANNEL_ERROR' ||
+            status === 'TIMED_OUT'
+          ) {
+            // Start a watchdog that re-subscribes every 10s until we're back.
+            // The Supabase client usually recovers on its own, but this catches
+            // edge cases on mobile where the socket is silently killed (iPad on
+            // hotspot switching towers, app backgrounded for a long time, etc).
+            if (!rfeReconnectTimer && navigator.onLine) {
+              rfeReconnectTimer = setInterval(() => {
+                if (get().realtimeConnected) {
+                  clearRfeReconnectTimer()
+                  return
+                }
+                if (!navigator.onLine) return
+                console.log('[Realtime] Attempting reconnect...')
+                get().subscribeToRFE(rfeId)
+              }, 10000)
+            }
           }
-          // On disconnect, don't show an error — just update status
-          // (CLOSED / TIMED_OUT / CHANNEL_ERROR are all non-critical)
         })
 
       set(state => ({
@@ -894,6 +950,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
 
     // ── Tear down all subscriptions ───────────────────────────────────────────
     unsubscribeAll: () => {
+      clearRfeReconnectTimer()
       get()._channels.forEach(ch => supabase.removeChannel(ch))
       set({ _channels: [], realtimeConnected: false })
     },
@@ -912,7 +969,20 @@ registerStoreRef({
   getRFEList: () => useRealtimeStore.getState().rfeList,
 })
 
-// Expose queue for pending-dot checks in ItemCard
+// Keep the store's pendingCount reactive: whenever the queue changes, refresh.
+// This means the TopBar pill and ItemCard pending dots update immediately as
+// mutations queue up offline or drain on reconnect — no polling needed.
+subscribeToQueueChanges(() => {
+  useRealtimeStore.getState().updatePendingCount()
+})
+
+// Seed pendingCount on load so the UI has the right number before any change.
+void getQueueCount().then(n => {
+  useRealtimeStore.setState({ pendingCount: n })
+  useRealtimeStore.getState().updatePendingCount()
+})
+
+/** @deprecated Use store.pendingItemIds instead for reactive updates. */
 export async function getPendingItemIds(): Promise<Set<string>> {
   const queue = await getQueue()
   const ids = new Set<string>()

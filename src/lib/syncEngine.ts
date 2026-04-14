@@ -6,7 +6,6 @@
  * toggleCheck mutations.
  */
 
-import { useState, useEffect } from 'react'
 import { supabase } from './supabase'
 import { getQueue, dequeue, incrementRetries } from './offlineQueue'
 import {
@@ -291,36 +290,6 @@ export function initSyncEngine(): void {
   })
 }
 
-// ─── useOnlineStatus hook ─────────────────────────────────────────────────────
-
-import { getQueueCount } from './offlineQueue'
-
-export function useOnlineStatus(): { isOnline: boolean; pendingCount: number } {
-  const [isOnline, setIsOnline] = useState(navigator.onLine)
-  const [pendingCount, setPendingCount] = useState(0)
-
-  useEffect(() => {
-    const onOnline = () => setIsOnline(true)
-    const onOffline = () => setIsOnline(false)
-
-    window.addEventListener('online', onOnline)
-    window.addEventListener('offline', onOffline)
-
-    // Poll queue count every 2s so the badge stays fresh
-    const interval = setInterval(async () => {
-      const count = await getQueueCount()
-      setPendingCount(count)
-    }, 2000)
-
-    // Initial count
-    getQueueCount().then(setPendingCount)
-
-    return () => {
-      window.removeEventListener('online', onOnline)
-      window.removeEventListener('offline', onOffline)
-      clearInterval(interval)
-    }
-  }, [])
-
-  return { isOnline, pendingCount }
-}
+// useOnlineStatus hook moved to ./useOnlineStatus.ts so it can read the
+// reactive pendingCount off the Zustand store without triggering a circular
+// module import at init time. This file now only owns the replay engine.

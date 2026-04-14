@@ -18,6 +18,21 @@ export interface QueueEntry {
 
 const QUEUE_KEY = 'fc_pendingQueue'
 
+// ─── Change notifier (reactive pending count) ─────────────────────────────────
+type Listener = () => void
+const listeners = new Set<Listener>()
+
+export function subscribeToQueueChanges(fn: Listener): () => void {
+  listeners.add(fn)
+  return () => listeners.delete(fn)
+}
+
+function notifyQueueChanged(): void {
+  for (const fn of listeners) {
+    try { fn() } catch (e) { console.warn('[Queue] listener threw:', e) }
+  }
+}
+
 async function readQueue(): Promise<QueueEntry[]> {
   try {
     const q = await get<QueueEntry[]>(QUEUE_KEY)
@@ -45,18 +60,21 @@ export async function enqueue(mutation: Omit<QueueEntry, 'id' | 'retries'>): Pro
   const q = await readQueue()
   q.push(entry)
   await writeQueue(q)
-  console.log('[offlineQueue] Enqueued:', entry.type, entry.itemId ?? entry.rfeId)
+  console.log('[Queue] Enqueued:', entry.type, entry.itemId ?? entry.rfeId)
+  notifyQueueChanged()
 }
 
 export async function dequeue(id: string): Promise<void> {
   const q = await readQueue()
   await writeQueue(q.filter(e => e.id !== id))
+  notifyQueueChanged()
 }
 
 export async function incrementRetries(id: string): Promise<void> {
   const q = await readQueue()
   const updated = q.map(e => e.id === id ? { ...e, retries: e.retries + 1 } : e)
   await writeQueue(updated)
+  notifyQueueChanged()
 }
 
 export async function getQueue(): Promise<QueueEntry[]> {
@@ -71,4 +89,5 @@ export async function getQueueCount(): Promise<number> {
 
 export async function clearQueue(): Promise<void> {
   await writeQueue([])
+  notifyQueueChanged()
 }

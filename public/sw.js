@@ -1,7 +1,7 @@
-// TCG Field Check — Service Worker v3.0
+// TCG Field Check — Service Worker v3.1
 // Offline-first: cache shell, network-only for Supabase API
 
-const CACHE_NAME = 'tcg-fieldcheck-v3'
+const CACHE_NAME = 'tcg-fieldcheck-v3-1'
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -11,6 +11,14 @@ const APP_SHELL = [
   '/icon-192-maskable.png',
   '/icon-512-maskable.png',
 ]
+
+// ── Message: activate a new SW immediately when the app asks ─────────────────
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    console.log('[SW] SKIP_WAITING received — activating new worker')
+    self.skipWaiting()
+  }
+})
 
 // ── Install: precache app shell ───────────────────────────────────────────────
 self.addEventListener('install', (event) => {
@@ -54,10 +62,17 @@ self.addEventListener('fetch', (event) => {
   // Network-only: Supabase API calls — IndexedDB handles offline data
   if (url.hostname.endsWith('supabase.co')) return
 
-  // Navigation requests: network-first, fall back to cached /index.html
+  // Navigation requests: network-first, fall back to cached /index.html.
+  // On success, update the cached shell so the next offline boot is fresh.
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() =>
+      fetch(event.request).then((res) => {
+        const clone = res.clone()
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put('/index.html', clone).catch(() => { /* ignore quota errors */ })
+        })
+        return res
+      }).catch(() =>
         caches.match('/index.html').then((r) => r || caches.match('/'))
       )
     )

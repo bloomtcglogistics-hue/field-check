@@ -2,7 +2,6 @@ import { useMemo, useState, useEffect } from 'react'
 import { FileX, Download } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
-import { getPendingItemIds } from '../stores/realtimeStore'
 import { generateHTMLReport, downloadReport } from '../lib/exportReport'
 import SearchBar from './SearchBar'
 import FilterBar from './FilterBar'
@@ -39,26 +38,13 @@ function NameModal({ onSave }: { onSave: (name: string) => void }) {
 
 export default function ChecklistView() {
   const { currentRfeId, userName, setUserName, searchQuery, filter, setFilter, setActiveTab } = useAppStore()
-  const { rfeList, items, checkStates, loading, loadRFE, subscribeToRFE, selectAllFiltered, conflicts } = useRealtimeStore()
+  const { rfeList, items, checkStates, loading, loadRFE, subscribeToRFE, selectAllFiltered, conflicts, pendingItemIds } = useRealtimeStore()
   const conflictItemIds = useMemo(() => new Set(conflicts.map(c => c.itemId)), [conflicts])
   const [showNameModal, setShowNameModal] = useState(false)
   const [toastMsg, setToastMsg] = useState('')
   const [toastVisible, setToastVisible] = useState(false)
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-  const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(new Set())
-
-  // Poll pending queue every 2s to drive pending-dot indicators on item cards
-  useEffect(() => {
-    let cancelled = false
-    const refresh = async () => {
-      const ids = await getPendingItemIds()
-      if (!cancelled) setPendingItemIds(ids)
-    }
-    refresh()
-    const timer = setInterval(refresh, 2000)
-    return () => { cancelled = true; clearInterval(timer) }
-  }, [])
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
@@ -313,9 +299,14 @@ export default function ChecklistView() {
           className="fab fab-primary"
           title="Export report"
           onClick={() => {
+            console.log('[Export] Generating report (online=' + navigator.onLine + ')')
             const html = generateHTMLReport(currentRfe, items, checkStates, userName)
             downloadReport(html, currentRfe)
-            showToast('Report downloaded')
+            showToast(
+              navigator.onLine
+                ? 'Report downloaded'
+                : 'Report downloaded (offline — some fonts may not load)'
+            )
           }}
         >
           <Download size={22} />
