@@ -46,6 +46,7 @@ export async function aiMapColumns(
       display_priority: json.display_priority ?? { primary: null, secondary: null, third: null, scenario: 4 },
       unmapped_columns: json.unmapped_columns ?? [],
       warnings: json.warnings ?? [],
+      extraction_hints: Array.isArray(json.extraction_hints) ? json.extraction_hints : [],
     }
   } catch (err) {
     if ((err as Error)?.name === 'AbortError') {

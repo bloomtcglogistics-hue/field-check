@@ -15,6 +15,13 @@ export interface DisplayConfig {
   ctxNames: string[]
   qtyNames: string[]
   grpName: string | null
+  /** Optional map from original header → canonical AI field name. Populated when
+   *  the RFE was imported with AI-enhanced mapping. Lets display-priority logic
+   *  reason about field TYPES (item_code, tag_number) instead of just columns. */
+  aiFieldMap?: Record<string, string>
+  /** Optional per-header composite spec so rendering code can surface useful
+   *  sub-parts (e.g., equipment_code) instead of the ugly joined composite ID. */
+  compositeParts?: Record<string, { separator: string; parts: string[] }>
 }
 
 export interface Item {
@@ -58,10 +65,18 @@ export type AIFieldName =
   | 'unknown'
   | string
 
+export interface Composite {
+  separator: string
+  /** Canonical field names (one per segment) in left-to-right order. */
+  parts: string[]
+}
+
 export interface ColumnMapping {
   field: AIFieldName
   confidence: number
   reason: string
+  /** Present when the column is a composite (e.g. "78596_UPC6GX..._30101"). */
+  composite?: Composite
 }
 
 export interface DisplayPriorityFromAI {
@@ -71,11 +86,24 @@ export interface DisplayPriorityFromAI {
   scenario: 1 | 2 | 3 | 4
 }
 
+/** Cleaning instruction returned by the AI when it remapped a column and the
+ *  row values need post-processing (e.g., strip a trailing " BBC FUJI" suffix). */
+export interface ExtractionHint {
+  source_column: string
+  pattern: string
+  extract_as: string
+  strip_suffix: boolean
+  suffix_pattern: string
+  example_input: string
+  example_output: string
+}
+
 export interface AIMappingResult {
   mappings: Record<string, ColumnMapping>
   display_priority: DisplayPriorityFromAI
   unmapped_columns: string[]
   warnings: string[]
+  extraction_hints?: ExtractionHint[]
 }
 
 // Result of computing display priority for a single item (per-row, runtime)

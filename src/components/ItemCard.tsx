@@ -89,15 +89,23 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
   const isChecked = state?.checked ?? false
   const note = noteValue !== null ? noteValue : (state?.note ?? '')
 
-  const { descName, idName, ctxNames, qtyNames } = displayConfig
+  const { descName, idName, ctxNames, qtyNames, aiFieldMap } = displayConfig
 
-  // Build a synthetic AI-field mapping from the persisted DisplayConfig so
-  // the shared displayPriority utility can decide primary/secondary/third.
-  // We treat the chosen ID column as `tag_number` (highest-priority identifier)
-  // — this matches the historical behavior of "ID first, description second".
-  const fieldMappings: Record<string, string> = {}
-  if (idName && idName !== descName) fieldMappings[idName] = 'tag_number'
-  if (descName) fieldMappings[descName] = 'description'
+  // Prefer the real AI field map when the RFE was AI-mapped on import. This
+  // preserves the distinction between tag_number / item_code / label_number /
+  // description so display-priority scenarios resolve correctly (e.g. an
+  // item_code column still gets the "primary" slot in scenario 2).
+  //
+  // Fall back to a synthetic mapping from the DisplayConfig slots for older
+  // RFEs that were imported before aiFieldMap existed.
+  let fieldMappings: Record<string, string>
+  if (aiFieldMap && Object.keys(aiFieldMap).length > 0) {
+    fieldMappings = { ...aiFieldMap }
+  } else {
+    fieldMappings = {}
+    if (idName && idName !== descName) fieldMappings[idName] = 'tag_number'
+    if (descName) fieldMappings[descName] = 'description'
+  }
 
   const display = getDisplayPriority(item.data, fieldMappings)
   const primaryTitle = display.primary
@@ -112,10 +120,29 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
 
   // Grid fields (Make, Model, Serial, Year, Status) from ctxNames
   const gridFields = ctxNames.filter(c => isGridField(c))
+  // Secondary identifier derived from a composite column — e.g. equipment_code
+  // extracted from a composite Asset ID. Surfaced as a small subtitle line
+  // instead of the ugly joined composite value.
+  const compositeEquipHeader = (() => {
+    if (!displayConfig.compositeParts) return null
+    for (const [h, spec] of Object.entries(displayConfig.compositeParts)) {
+      const idx = spec.parts.indexOf('equipment_code')
+      if (idx === -1) continue
+      const key = `${h}__part__equipment_code`
+      if (item.data[key]) return key
+    }
+    return null
+  })()
+  const compositeEquipValue = compositeEquipHeader ? item.data[compositeEquipHeader] : null
+
   const extraFields = Object.keys(item.data).filter(k => {
     if (k === idName || k === descName) return false
     if (qtyNames.includes(k)) return false
     if (gridFields.includes(k)) return false
+    // Hide the synthetic keys from the detail grid — they're surfaced elsewhere
+    // (equipment_code as a subtitle) or kept for search/debugging only.
+    if (k.includes('__part__')) return false
+    if (k.endsWith('__raw')) return false
     return true
   })
 
@@ -198,6 +225,11 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
           {tertiary && (
             <div className="item-tertiary" style={{ fontSize: 12, color: 'var(--text3)' }}>
               {highlight(tertiary, searchQuery)}
+            </div>
+          )}
+          {compositeEquipValue && (
+            <div className="item-tertiary" style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'monospace' }}>
+              {highlight(compositeEquipValue, searchQuery)}
             </div>
           )}
 

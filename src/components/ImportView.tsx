@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback } from 'react'
-import { Upload, FileText, Check, WifiOff, Sparkles } from 'lucide-react'
+import { Upload, FileText, Check, WifiOff, Sparkles, AlertTriangle } from 'lucide-react'
 import { parseFile, type ParsedFile } from '../lib/fileParser'
 import { aiMapColumns, buildSampleRows } from '../lib/aiColumnMapper'
 import { mergeAIMapping } from '../lib/columnDetector'
+import { applyAIPostProcessing } from '../lib/aiPostProcess'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
 import { useOnlineStatus } from '../lib/useOnlineStatus'
@@ -61,6 +62,7 @@ export default function ImportView() {
   const [listName, setListName] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [parseError, setParseError] = useState('')
+  const [aiNotices, setAiNotices] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const { importRFE, error: storeError } = useRealtimeStore()
@@ -72,6 +74,7 @@ export default function ImportView() {
     setParseError('')
     setAiResult(null)
     setOverrides({})
+    setAiNotices([])
     try {
       // Step 1 — parse locally (works offline)
       const result = await parseFile(file)
@@ -91,9 +94,15 @@ export default function ImportView() {
       const ai = await aiMapColumns(result.headers, sampleRows, result.fileName)
 
       if (ai) {
-        const aiConfig = mergeAIMapping(ai, result.headers)
-        setParsed({ ...result, displayConfig: aiConfig })
-        setAiResult(ai)
+        // Dedupe duplicate field claims, apply extraction hints to every row,
+        // and split composite columns into searchable parts BEFORE the rows
+        // get handed off to the import path — clean data in, clean data stored.
+        const post = applyAIPostProcessing(result.rows, ai)
+        const cleanedAi: AIMappingResult = { ...ai, mappings: post.cleanedMappings }
+        const aiConfig = mergeAIMapping(cleanedAi, result.headers)
+        setParsed({ ...result, rows: result.rows, displayConfig: aiConfig })
+        setAiResult(cleanedAi)
+        setAiNotices(post.notices)
         setMappingSource('ai')
       } else {
         // Backend failed — keep the fuzzy DisplayConfig parseFile already produced
@@ -168,6 +177,7 @@ export default function ImportView() {
     setOverrides({})
     setParseError('')
     setListName('')
+    setAiNotices([])
   }
 
   if (stage === 'done') {
@@ -259,6 +269,31 @@ export default function ImportView() {
             />
             <Sparkles size={14} />
             <span>AI analyzing columns…</span>
+          </div>
+        )}
+
+        {/* AI notices — duplicate-field warnings and extraction-hint summary */}
+        {aiNotices.length > 0 && stage !== 'importing' && stage !== 'analyzing' && (
+          <div
+            role="status"
+            style={{
+              display: 'flex',
+              gap: 8,
+              padding: '10px 12px',
+              background: 'var(--orange-light)',
+              border: '1px solid var(--orange)',
+              borderRadius: 'var(--radius)',
+              color: 'var(--orange)',
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+            <ul style={{ margin: 0, paddingLeft: 16 }}>
+              {aiNotices.map((n, i) => (
+                <li key={i}>{n}</li>
+              ))}
+            </ul>
           </div>
         )}
 

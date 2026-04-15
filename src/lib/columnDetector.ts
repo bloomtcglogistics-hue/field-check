@@ -209,9 +209,32 @@ export function mergeAIMapping(aiResult: AIMappingResult, headers: string[]): Di
   // Any remaining group candidates become ctx tags so they're still visible
   if (grpCandidates.length > 1) ctxNames.push(...grpCandidates.slice(1))
 
-  // Fallbacks if AI omitted critical fields — keep behaviour sane
+  // Fallbacks. If the AI omitted an ID column entirely, fall back to the first
+  // header so at least something shows. But DO NOT invent a description — if
+  // the AI said there isn't one, leave descName empty so display-priority can
+  // fall back to context (location/vendor/category) instead of surfacing a
+  // random column as "description".
   const finalIdName = idName || headers[0] || ''
-  const finalDescName = descName || headers[Math.min(1, headers.length - 1)] || ''
+  const finalDescName = descName
+
+  // Build header → canonical AI field map so ItemCard can reason about field
+  // TYPES (item_code, tag_number, etc.) at render time instead of guessing
+  // from the DisplayConfig slots.
+  const aiFieldMap: Record<string, string> = {}
+  for (const [header, mapping] of Object.entries(m)) {
+    if (mapping?.field) aiFieldMap[header] = mapping.field
+  }
+
+  // Surface composite split specs so downstream code can expose parts.
+  const compositeParts: Record<string, { separator: string; parts: string[] }> = {}
+  for (const [header, mapping] of Object.entries(m)) {
+    if (mapping?.composite?.parts?.length) {
+      compositeParts[header] = {
+        separator: mapping.composite.separator || '_',
+        parts: mapping.composite.parts,
+      }
+    }
+  }
 
   const config: DisplayConfig = {
     descName: finalDescName,
@@ -219,14 +242,17 @@ export function mergeAIMapping(aiResult: AIMappingResult, headers: string[]): Di
     ctxNames: ctxNames.slice(0, 8),
     qtyNames,
     grpName,
+    aiFieldMap,
+    compositeParts: Object.keys(compositeParts).length ? compositeParts : undefined,
   }
 
   console.group('[FieldCheck] AI column mapping merged')
   console.log('ID column     →', config.idName)
-  console.log('Desc column   →', config.descName)
+  console.log('Desc column   →', config.descName || '(none)')
   console.log('Qty columns   →', config.qtyNames.length ? config.qtyNames : '(none)')
   console.log('Group column  →', config.grpName ?? '(none)')
   console.log('Context tags  →', config.ctxNames.length ? config.ctxNames : '(none)')
+  console.log('Composite     →', Object.keys(compositeParts).length ? compositeParts : '(none)')
   if (aiResult.unmapped_columns?.length) {
     console.log('AI unmapped   →', aiResult.unmapped_columns)
   }

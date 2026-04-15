@@ -24,6 +24,13 @@ const FIRST_PRIORITY: ReadonlyArray<string> = ['tag_number']
 const SECOND_PRIORITY: ReadonlyArray<string> = ['item_code', 'ic_number']
 const THIRD_PRIORITY: ReadonlyArray<string> = ['label_number']
 
+/** When description is absent, fill the secondary/tertiary slots with the best
+ *  available context field in this order. Keeps cards informative on Danieli
+ *  shipping manifests where true descriptions don't exist. */
+const CONTEXT_FALLBACK: ReadonlyArray<string> = [
+  'location', 'vendor', 'category', 'po_number',
+]
+
 function findHeader(
   fieldMappings: Record<string, string>,
   candidates: ReadonlyArray<string>,
@@ -96,6 +103,27 @@ export function getDisplayPriority(
     // Scenario 4: nothing but description (or nothing at all)
     primary = valueOrNull(itemData, descHeader)
     if (descHeader) surfaced.add(descHeader)
+  }
+
+  // Context fallback: if description was missing (or any of the ID slots
+  // produced nothing), fill remaining slots from best-available context fields.
+  // Danieli shipping manifests typically have no real description column, so
+  // falling back to location/vendor/category keeps cards useful.
+  const slotValues = [primary, secondary, third]
+  if (slotValues.some(v => v === null || v === '')) {
+    for (const fallbackField of CONTEXT_FALLBACK) {
+      const h = findHeaderWithValue(itemData, fieldMappings, [fallbackField])
+      if (!h || surfaced.has(h)) continue
+      const v = valueOrNull(itemData, h)
+      if (!v) continue
+      const slotIdx = slotValues.findIndex(x => x === null || x === '')
+      if (slotIdx === -1) break
+      slotValues[slotIdx] = v
+      surfaced.add(h)
+    }
+    primary = slotValues[0]
+    secondary = slotValues[1]
+    third = slotValues[2]
   }
 
   // Compact: if a slot is empty, slide later slots up.
