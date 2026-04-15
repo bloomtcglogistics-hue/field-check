@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { FileX, Download } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
-import { generateHTMLReport, downloadReport } from '../lib/exportReport'
+import { generatePDFReport, generateHTMLReportLegacy, downloadReport } from '../lib/exportReport'
 import SearchBar from './SearchBar'
 import FilterBar from './FilterBar'
 import ItemCard from './ItemCard'
@@ -299,14 +299,16 @@ export default function ChecklistView() {
           className="fab fab-primary"
           title="Export report"
           onClick={() => {
-            console.log('[Export] Generating report (online=' + navigator.onLine + ')')
-            const html = generateHTMLReport(currentRfe, items, checkStates, userName)
-            downloadReport(html, currentRfe)
-            showToast(
-              navigator.onLine
-                ? 'Report downloaded'
-                : 'Report downloaded (offline — some fonts may not load)'
-            )
+            console.log('[Export] Generating PDF report (online=' + navigator.onLine + ')')
+            try {
+              generatePDFReport(currentRfe, items, checkStates, userName)
+              showToast(navigator.onLine ? 'PDF report downloaded' : 'PDF report downloaded (offline)')
+            } catch (err) {
+              console.error('[Export] PDF failed, falling back to HTML:', err)
+              const html = generateHTMLReportLegacy(currentRfe, items, checkStates, userName)
+              downloadReport(html, currentRfe)
+              showToast('Report downloaded (HTML fallback)')
+            }
           }}
         >
           <Download size={22} />

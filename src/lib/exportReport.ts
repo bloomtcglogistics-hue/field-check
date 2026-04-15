@@ -1,4 +1,324 @@
+import { jsPDF } from 'jspdf'
+import autoTable, { type CellHookData } from 'jspdf-autotable'
 import type { RFEIndex, Item, CheckState } from '../types'
+
+// ── Brand palette ────────────────────────────────────────────────────────
+type RGB = [number, number, number]
+const NAVY: RGB = [27, 58, 92]
+const GREEN: RGB = [22, 163, 74]
+const ORANGE: RGB = [249, 115, 22]
+const GRAY: RGB = [107, 114, 128]
+const LIGHT_GRAY: RGB = [249, 250, 251]
+const BORDER_GRAY: RGB = [229, 231, 235]
+const PROGRESS_TRACK: RGB = [229, 231, 235]
+const FOUND_BG: RGB = [240, 253, 244]
+const MISSING_BG: RGB = [255, 247, 237]
+const BLACK: RGB = [17, 24, 39]
+const WHITE: RGB = [255, 255, 255]
+
+const setText = (d: jsPDF, c: RGB) => d.setTextColor(c[0], c[1], c[2])
+const setFill = (d: jsPDF, c: RGB) => d.setFillColor(c[0], c[1], c[2])
+const setStroke = (d: jsPDF, c: RGB) => d.setDrawColor(c[0], c[1], c[2])
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+function buildFilenameStamp(d: Date): string {
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
+}
+
+/**
+ * Generate a professional TCG Equipment Verification Report PDF and trigger download.
+ * Designed for client/supervisor presentation on industrial sites.
+ */
+export function generatePDFReport(
+  rfe: RFEIndex,
+  items: Item[],
+  checkStates: Map<string, CheckState>,
+  userName = ''
+): void {
+  const doc = new jsPDF({ unit: 'pt', format: 'letter', orientation: 'portrait' })
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const M = 43.2 // 0.6" margin
+
+  const { descName, idName, ctxNames } = rfe.display_config
+  const total = items.length
+  const checkedCount = items.filter(it => checkStates.get(it.id)?.checked).length
+  const missing = total - checkedCount
+  const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0
+
+  const now = new Date()
+  const dateLong = now.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  })
+  const timeShort = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const dateShort = now.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+
+  let y = M
+
+  // ── Section 1: Brand header ──────────────────────────────────────────
+  doc.setFont('helvetica', 'bold')
+  setText(doc, NAVY)
+  doc.setFontSize(26)
+  doc.text('THOMPSON', M, y + 18, { charSpace: 2 })
+
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.text('C O N S T R U C T I O N   G R O U P', M, y + 32, { charSpace: 1 })
+
+  doc.setFont('helvetica', 'italic')
+  doc.setFontSize(8)
+  setText(doc, GRAY)
+  doc.text('Est. 1986 \u2022 Sumter, SC', M, y + 44)
+
+  // TCG mark top-right
+  doc.setFont('helvetica', 'bold')
+  setText(doc, NAVY)
+  doc.setFontSize(28)
+  doc.text('TCG', pageW - M, y + 24, { align: 'right' })
+
+  y += 58
+
+  // Thin navy rule
+  setStroke(doc, NAVY)
+  doc.setLineWidth(1)
+  doc.line(M, y, pageW - M, y)
+  y += 22
+
+  // Title
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(16)
+  setText(doc, NAVY)
+  doc.text('EQUIPMENT VERIFICATION REPORT', pageW / 2, y, { align: 'center' })
+  y += 18
+
+  // Date / time
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(12)
+  setText(doc, GRAY)
+  doc.text(`${dateLong} \u2014 ${timeShort}`, pageW / 2, y, { align: 'center' })
+  y += 26
+
+  // ── Section 2: Report meta ───────────────────────────────────────────
+  const drawMeta = (label: string, value: string, x: number, yy: number) => {
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(11)
+    setText(doc, GRAY)
+    doc.text(label, x, yy)
+    const lw = doc.getTextWidth(label)
+    doc.setFont('helvetica', 'bold')
+    setText(doc, BLACK)
+    doc.text(value || '\u2014', x + lw + 4, yy)
+  }
+
+  const colL = M
+  const colR = pageW / 2 + 10
+
+  drawMeta('Source:', rfe.file_name, colL, y)
+  drawMeta('Company:', 'TCG \u2014 Thompson Construction Group', colR, y)
+  y += 15
+  drawMeta('Inspector:', userName, colL, y)
+  drawMeta('List:', rfe.name, colR, y)
+  y += 12
+
+  // Separator
+  setStroke(doc, BORDER_GRAY)
+  doc.setLineWidth(0.5)
+  doc.line(M, y, pageW - M, y)
+  y += 18
+
+  // ── Section 3: Summary statistics (4 boxes) ──────────────────────────
+  const boxGap = 10
+  const boxW = (pageW - 2 * M - 3 * boxGap) / 4
+  const boxH = 56
+
+  const stats: Array<{ label: string; value: string; color: RGB }> = [
+    { label: 'TOTAL', value: String(total), color: GRAY },
+    { label: 'FOUND', value: String(checkedCount), color: GREEN },
+    { label: 'MISSING', value: String(missing), color: ORANGE },
+    { label: 'COMPLETE', value: `${pct}%`, color: GREEN },
+  ]
+
+  stats.forEach((s, i) => {
+    const x = M + i * (boxW + boxGap)
+    setStroke(doc, BORDER_GRAY)
+    doc.setLineWidth(0.7)
+    doc.roundedRect(x, y, boxW, boxH, 4, 4, 'S')
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(22)
+    setText(doc, s.color)
+    doc.text(s.value, x + boxW / 2, y + 28, { align: 'center' })
+
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(8)
+    setText(doc, GRAY)
+    doc.text(s.label, x + boxW / 2, y + 46, { align: 'center', charSpace: 1 })
+  })
+  y += boxH + 14
+
+  // Progress bar
+  const barW = pageW - 2 * M
+  const barH = 6
+  setFill(doc, PROGRESS_TRACK)
+  doc.roundedRect(M, y, barW, barH, 3, 3, 'F')
+  if (pct > 0) {
+    const filled = Math.max(barH, (barW * pct) / 100)
+    setFill(doc, GREEN)
+    doc.roundedRect(M, y, filled, barH, 3, 3, 'F')
+  }
+  y += barH + 16
+
+  // ── Section 4: Item table ────────────────────────────────────────────
+  const extraCols = ctxNames.slice(0, 3)
+  const head: string[] = ['#', idName || 'ID', descName || 'Description', ...extraCols, 'Status', 'Notes']
+  const statusColIdx = 3 + extraCols.length
+  const notesColIdx = head.length - 1
+
+  const body = items.map((item, idx) => {
+    const state = checkStates.get(item.id)
+    const isChecked = state?.checked ?? false
+    const id = item.data[idName] || ''
+    const desc = item.data[descName] || ''
+    const note = state?.note || ''
+    const by = state?.checked_by || ''
+    const ts = state?.checked_at
+      ? new Date(state.checked_at).toLocaleString('en-US', {
+          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+        })
+      : ''
+    const auditLine = by ? `\u2014 ${by}${ts ? ` @ ${ts}` : ''}` : ''
+    const noteText = [note, auditLine].filter(Boolean).join('\n')
+
+    return [
+      String(idx + 1),
+      id,
+      desc,
+      ...extraCols.map(c => item.data[c] || ''),
+      isChecked ? 'FOUND' : 'MISSING',
+      noteText,
+    ]
+  })
+
+  autoTable(doc, {
+    head: [head],
+    body,
+    startY: y,
+    margin: { left: M, right: M, top: M, bottom: M + 24 },
+    theme: 'grid',
+    styles: {
+      font: 'helvetica',
+      fontSize: 9,
+      cellPadding: 5,
+      textColor: BLACK,
+      lineColor: BORDER_GRAY,
+      lineWidth: 0.3,
+      overflow: 'linebreak',
+      valign: 'middle',
+    },
+    headStyles: {
+      fillColor: NAVY,
+      textColor: WHITE,
+      fontStyle: 'bold',
+      fontSize: 9,
+      halign: 'left',
+      cellPadding: 6,
+      lineColor: NAVY,
+      lineWidth: 0,
+    },
+    columnStyles: {
+      0: { cellWidth: 24, halign: 'center', textColor: GRAY },
+      1: { fontStyle: 'bold', cellWidth: 70 },
+      [statusColIdx]: { fontStyle: 'bold', halign: 'center', cellWidth: 62 },
+      [notesColIdx]: { textColor: GRAY, fontStyle: 'italic' },
+    },
+    didParseCell(data: CellHookData) {
+      if (data.section !== 'body') return
+      const rowIdx = data.row.index
+      const item = items[rowIdx]
+      if (!item) return
+      const isChecked = checkStates.get(item.id)?.checked ?? false
+
+      data.cell.styles.fillColor = isChecked
+        ? (isAlt(rowIdx) ? LIGHT_GRAY : FOUND_BG)
+        : (isAlt(rowIdx) ? LIGHT_GRAY : MISSING_BG)
+
+      if (data.column.index === statusColIdx) {
+        data.cell.styles.textColor = isChecked ? GREEN : ORANGE
+        data.cell.styles.fontStyle = 'bold'
+      }
+      if (data.column.index === notesColIdx) {
+        data.cell.styles.textColor = GRAY
+        data.cell.styles.fontStyle = 'italic'
+      }
+    },
+  })
+
+  // ── Section 6: Signature block (after table) ─────────────────────────
+  const anyDoc = doc as unknown as { lastAutoTable?: { finalY: number } }
+  const finalY = anyDoc.lastAutoTable?.finalY ?? y
+  const sigNeeded = 80
+  let sigY: number
+  if (finalY + sigNeeded > pageH - M - 24) {
+    doc.addPage()
+    sigY = M + 40
+  } else {
+    sigY = finalY + 48
+  }
+
+  const sigGap = 24
+  const sigColW = (pageW - 2 * M - 2 * sigGap) / 3
+  const sigCols = [
+    { x: M, label: 'Inspector Signature' },
+    { x: M + sigColW + sigGap, label: 'Date' },
+    { x: M + 2 * (sigColW + sigGap), label: 'Supervisor Name (Print)' },
+  ]
+  sigCols.forEach(c => {
+    setStroke(doc, BLACK)
+    doc.setLineWidth(0.6)
+    doc.line(c.x, sigY, c.x + sigColW, sigY)
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    setText(doc, GRAY)
+    doc.text(c.label, c.x, sigY + 14)
+  })
+
+  // ── Section 5: Footer on every page (second pass) ────────────────────
+  const totalPages = doc.getNumberOfPages()
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p)
+    const pW = doc.internal.pageSize.getWidth()
+    const pH = doc.internal.pageSize.getHeight()
+
+    setStroke(doc, NAVY)
+    doc.setLineWidth(0.5)
+    doc.line(M, pH - 30, pW - M, pH - 30)
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(8)
+    setText(doc, GRAY)
+    doc.text('Thompson Construction Group \u2022 Equipment Verification Report', M, pH - 18)
+    doc.text(dateShort, pW / 2, pH - 18, { align: 'center' })
+    doc.text(`Page ${p} of ${totalPages}`, pW - M, pH - 18, { align: 'right' })
+  }
+
+  // ── Save ─────────────────────────────────────────────────────────────
+  const filename = `TCG_Equipment_Report_${buildFilenameStamp(now)}.pdf`
+  doc.save(filename)
+}
+
+function isAlt(rowIdx: number): boolean {
+  // Kept for future use if alternating shading over status tint is desired.
+  // Currently returns false so status tints render consistently per row.
+  void rowIdx
+  return false
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Legacy HTML export — kept as fallback in case PDF generation fails.
+// ────────────────────────────────────────────────────────────────────────
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -6,7 +326,7 @@ function esc(s: string): string {
 
 const TH = 'text-align:left;padding:9px 10px;background:#f9fafb;border-bottom:2px solid #e5e7eb;font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.5px'
 
-export function generateHTMLReport(
+export function generateHTMLReportLegacy(
   rfe: RFEIndex,
   items: Item[],
   checkStates: Map<string, CheckState>,
@@ -63,10 +383,9 @@ export function generateHTMLReport(
     '<meta charset="UTF-8">',
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     `<title>TCG Field Check \u2014 ${esc(rfe.name)}</title>`,
-    '<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet">',
     '<style>',
     '*{box-sizing:border-box;margin:0;padding:0}',
-    "body{font-family:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;padding:24px;color:#111827;background:#f3f4f6}",
+    "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;padding:24px;color:#111827;background:#f3f4f6}",
     '.header{background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;padding:24px 28px;border-radius:12px;margin-bottom:20px}',
     '.header h1{font-size:22px;font-weight:700;margin-bottom:4px}',
     '.header p{font-size:13px;opacity:.85;margin-top:3px}',
