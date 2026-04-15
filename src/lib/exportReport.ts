@@ -256,7 +256,7 @@ export function generatePDFReport(
 
     let statusText: string
     if (isPartial) {
-      statusText = `PARTIAL (${foundNum}/${req})`
+      statusText = 'PARTIAL'
     } else if (isChecked) {
       statusText = 'FOUND'
     } else {
