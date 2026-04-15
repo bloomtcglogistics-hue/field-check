@@ -15,7 +15,7 @@ const FOUND_BG: RGB = [240, 253, 244]
 const MISSING_BG: RGB = [255, 247, 237]
 const AMBER: RGB = [245, 158, 11]
 const AMBER_DARK: RGB = [180, 83, 9]
-const AMBER_BG: RGB = [254, 243, 199]
+const AMBER_BG: RGB = [253, 230, 138]
 const BLACK: RGB = [17, 24, 39]
 const WHITE: RGB = [255, 255, 255]
 
@@ -29,6 +29,14 @@ function pad2(n: number): string {
 
 function buildFilenameStamp(d: Date): string {
   return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
+}
+
+function extractFileFormat(fileName: string | null | undefined): string {
+  const name = (fileName ?? '').trim()
+  if (!name) return '\u2014'
+  const dot = name.lastIndexOf('.')
+  if (dot === -1 || dot === name.length - 1) return 'FILE'
+  return name.slice(dot + 1).toUpperCase()
 }
 
 function buildFilenamePrefix(reportType: string | null | undefined): string {
@@ -152,7 +160,7 @@ export function generatePDFReport(
   const colL = M
   const colR = pageW / 2 + 10
 
-  drawMeta('Source:', rfe.file_name, colL, y)
+  drawMeta('Source:', extractFileFormat(rfe.file_name), colL, y)
   drawMeta('Company:', 'TCG \u2014 Thompson Construction Group', colR, y)
   y += 15
   drawMeta('Inspector:', userName, colL, y)
@@ -211,7 +219,7 @@ export function generatePDFReport(
 
   // ── Section 4: Item table ────────────────────────────────────────────
   const extraCols = ctxNames.slice(0, 3)
-  const head: string[] = ['#', idName || 'ID', descName || 'Description', ...extraCols, 'Req', 'Found', 'Status', 'Notes']
+  const head: string[] = ['#', idName || 'ID', descName || 'Description', ...extraCols, 'Qty Requested', 'Qty Found', 'Status', 'Notes']
   const reqColIdx = 3 + extraCols.length
   const foundColIdx = reqColIdx + 1
   const statusColIdx = foundColIdx + 1
@@ -287,18 +295,19 @@ export function generatePDFReport(
       fillColor: NAVY,
       textColor: WHITE,
       fontStyle: 'bold',
-      fontSize: 9,
+      fontSize: 7,
       halign: 'left',
       cellPadding: 6,
       lineColor: NAVY,
       lineWidth: 0,
+      overflow: 'visible',
     },
     columnStyles: {
       0: { cellWidth: 24, halign: 'center', textColor: GRAY },
-      1: { fontStyle: 'bold', cellWidth: 70 },
-      [reqColIdx]: { halign: 'center', cellWidth: 36 },
-      [foundColIdx]: { halign: 'center', cellWidth: 36 },
-      [statusColIdx]: { fontStyle: 'bold', halign: 'center', cellWidth: 78 },
+      1: { fontStyle: 'bold', cellWidth: 64 },
+      [reqColIdx]: { halign: 'center', cellWidth: 58 },
+      [foundColIdx]: { halign: 'center', cellWidth: 52 },
+      [statusColIdx]: { fontStyle: 'bold', halign: 'center', cellWidth: 70 },
       [notesColIdx]: { textColor: GRAY, fontStyle: 'italic' },
     },
     didParseCell(data: CellHookData) {
