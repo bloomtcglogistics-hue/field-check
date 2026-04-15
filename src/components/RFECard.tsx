@@ -53,14 +53,15 @@ export default function RFECard({
           </div>
         </div>
         <div className="rfe-meta">
-          {total} items · {date} · {rfe.file_name}
+          <span className="rfe-meta-main">{total} items · {date}</span>
+          <span className="rfe-meta-file">{rfe.file_name}</span>
         </div>
         <div className="rfe-progress" style={{ marginTop: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
             <span style={{ fontSize: 12, color: 'var(--text3)' }}>{checkedCount} / {total} verified</span>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)' }}>{pct}%</span>
           </div>
-          <div className="progress-track">
+          <div className="progress-track" style={{ height: 4 }}>
             <div className="progress-fill" style={{ width: `${pct}%` }} />
           </div>
         </div>

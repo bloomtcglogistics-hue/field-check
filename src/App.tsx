@@ -34,6 +34,7 @@ export default function App() {
 
   return (
     <>
+      <div className="accent-bar" />
       <TopBar />
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {activeTab === 'checklist'  && <ChecklistView />}
