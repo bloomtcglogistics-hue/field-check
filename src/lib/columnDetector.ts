@@ -1,4 +1,4 @@
-import type { DisplayConfig } from '../types'
+import type { DisplayConfig, AIMappingResult } from '../types'
 
 interface ColumnScore {
   header: string
@@ -142,6 +142,97 @@ export function detectColumns(headers: string[]): DisplayConfig {
   const allUsed = new Set([idName, descName, grpName, ...qtyNames, ...ctxNames].filter(Boolean) as string[])
   const unmapped = headers.filter(h => !allUsed.has(h))
   if (unmapped.length) console.log('Unmapped cols →', unmapped, '(shown in Details)')
+  console.groupEnd()
+
+  return config
+}
+
+// ── AI mapping → DisplayConfig bridge ───────────────────────────────────────
+
+/**
+ * AI canonical field names that act as the row "ID" on a card. Order matters:
+ * the highest-priority field present wins.
+ */
+const ID_FIELDS_BY_PRIORITY = ['tag_number', 'item_code', 'ic_number', 'label_number'] as const
+
+const QTY_FIELDS = new Set(['quantity'])
+const GRP_FIELDS = new Set(['category', 'type', 'class'])
+const DESC_FIELDS = new Set(['description'])
+// Anything else (make, model, serial_number, year, status, vendor, location, …)
+// becomes a context tag.
+
+function findHeaderForField(
+  mappings: AIMappingResult['mappings'],
+  field: string,
+): string | null {
+  for (const [header, m] of Object.entries(mappings)) {
+    if (m?.field === field) return header
+  }
+  return null
+}
+
+/** Convert a successful AI mapping result into the existing DisplayConfig shape. */
+export function mergeAIMapping(aiResult: AIMappingResult, headers: string[]): DisplayConfig {
+  const m = aiResult.mappings ?? {}
+
+  // Pick highest-priority ID field that the AI actually mapped
+  let idName = ''
+  for (const f of ID_FIELDS_BY_PRIORITY) {
+    const h = findHeaderForField(m, f)
+    if (h) { idName = h; break }
+  }
+
+  const descName = findHeaderForField(m, 'description') ?? ''
+
+  const qtyNames: string[] = []
+  const grpCandidates: string[] = []
+  const ctxNames: string[] = []
+
+  for (const header of headers) {
+    const mapping = m[header]
+    if (!mapping) continue
+    const field = mapping.field
+    if (header === idName || header === descName) continue
+    if (QTY_FIELDS.has(field)) {
+      qtyNames.push(header)
+    } else if (GRP_FIELDS.has(field)) {
+      grpCandidates.push(header)
+    } else if (DESC_FIELDS.has(field)) {
+      // Already handled by descName
+      continue
+    } else if (field && field !== 'unknown') {
+      ctxNames.push(header)
+    }
+  }
+
+  const grpName = grpCandidates[0] ?? null
+  // Any remaining group candidates become ctx tags so they're still visible
+  if (grpCandidates.length > 1) ctxNames.push(...grpCandidates.slice(1))
+
+  // Fallbacks if AI omitted critical fields — keep behaviour sane
+  const finalIdName = idName || headers[0] || ''
+  const finalDescName = descName || headers[Math.min(1, headers.length - 1)] || ''
+
+  const config: DisplayConfig = {
+    descName: finalDescName,
+    idName: finalIdName,
+    ctxNames: ctxNames.slice(0, 8),
+    qtyNames,
+    grpName,
+  }
+
+  console.group('[FieldCheck] AI column mapping merged')
+  console.log('ID column     →', config.idName)
+  console.log('Desc column   →', config.descName)
+  console.log('Qty columns   →', config.qtyNames.length ? config.qtyNames : '(none)')
+  console.log('Group column  →', config.grpName ?? '(none)')
+  console.log('Context tags  →', config.ctxNames.length ? config.ctxNames : '(none)')
+  if (aiResult.unmapped_columns?.length) {
+    console.log('AI unmapped   →', aiResult.unmapped_columns)
+  }
+  if (aiResult.warnings?.length) {
+    console.warn('AI warnings   →', aiResult.warnings)
+  }
   console.groupEnd()
 
   return config

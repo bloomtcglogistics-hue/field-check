@@ -36,6 +36,56 @@ export interface CheckState {
   qty_found?: number | null
 }
 
+// ── AI Column Mapping ─────────────────────────────────────────────────────
+// Canonical AI field names — what the backend can return for a column
+export type AIFieldName =
+  | 'tag_number'
+  | 'item_code'
+  | 'ic_number'
+  | 'label_number'
+  | 'description'
+  | 'quantity'
+  | 'category'
+  | 'type'
+  | 'class'
+  | 'make'
+  | 'model'
+  | 'serial_number'
+  | 'year'
+  | 'status'
+  | 'vendor'
+  | 'location'
+  | 'unknown'
+  | string
+
+export interface ColumnMapping {
+  field: AIFieldName
+  confidence: number
+  reason: string
+}
+
+export interface DisplayPriorityFromAI {
+  primary: string | null
+  secondary: string | null
+  third: string | null
+  scenario: 1 | 2 | 3 | 4
+}
+
+export interface AIMappingResult {
+  mappings: Record<string, ColumnMapping>
+  display_priority: DisplayPriorityFromAI
+  unmapped_columns: string[]
+  warnings: string[]
+}
+
+// Result of computing display priority for a single item (per-row, runtime)
+export interface DisplayFields {
+  primary: string
+  secondary: string | null
+  third: string | null
+  hiddenSearchable: string[]
+}
+
 export type ViewTab = 'checklist' | 'inventory' | 'import' | 'settings'
 
 export type SortMode = 'index' | 'alpha' | 'status'

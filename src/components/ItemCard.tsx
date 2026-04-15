@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
+import { getDisplayPriority } from '../lib/displayPriority'
 import type { Item, DisplayConfig } from '../types'
 
 interface Props {
@@ -90,12 +91,18 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
 
   const { descName, idName, ctxNames, qtyNames } = displayConfig
 
-  // Primary ID and description
-  const idVal = item.data[idName] || ''
-  const descVal = item.data[descName] || ''
-  const hasId = !!idVal && idName !== descName
-  const primaryTitle = hasId ? idVal : descVal
-  const subtitle = hasId ? descVal : ''
+  // Build a synthetic AI-field mapping from the persisted DisplayConfig so
+  // the shared displayPriority utility can decide primary/secondary/third.
+  // We treat the chosen ID column as `tag_number` (highest-priority identifier)
+  // — this matches the historical behavior of "ID first, description second".
+  const fieldMappings: Record<string, string> = {}
+  if (idName && idName !== descName) fieldMappings[idName] = 'tag_number'
+  if (descName) fieldMappings[descName] = 'description'
+
+  const display = getDisplayPriority(item.data, fieldMappings)
+  const primaryTitle = display.primary
+  const subtitle = display.secondary ?? ''
+  const tertiary = display.third ?? ''
 
   // Qty column — show qty_found input if qty > 1
   const qtyColName = qtyNames[0] ?? null
@@ -179,13 +186,18 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
         {/* Content */}
         <div className="item-content" onClick={handleCheck}>
           {primaryTitle && (
-            <div className="item-primary">
+            <div className="item-primary" style={{ fontSize: 14, fontWeight: 700 }}>
               {highlight(primaryTitle, searchQuery)}
             </div>
           )}
           {subtitle && (
-            <div className="item-subtitle">
+            <div className="item-subtitle" style={{ fontSize: 12, fontWeight: 400 }}>
               {highlight(subtitle, searchQuery)}
+            </div>
+          )}
+          {tertiary && (
+            <div className="item-tertiary" style={{ fontSize: 12, color: 'var(--text3)' }}>
+              {highlight(tertiary, searchQuery)}
             </div>
           )}
 

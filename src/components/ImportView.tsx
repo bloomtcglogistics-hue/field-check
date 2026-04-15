@@ -1,39 +1,108 @@
 import { useState, useRef, useCallback } from 'react'
-import { Upload, FileText, Check, WifiOff } from 'lucide-react'
+import { Upload, FileText, Check, WifiOff, Sparkles } from 'lucide-react'
 import { parseFile, type ParsedFile } from '../lib/fileParser'
+import { aiMapColumns, buildSampleRows } from '../lib/aiColumnMapper'
+import { mergeAIMapping } from '../lib/columnDetector'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
 import { useOnlineStatus } from '../lib/useOnlineStatus'
-import ColumnPreview from './ColumnPreview'
+import ColumnPreview, { type RoleKey, type MappingSource } from './ColumnPreview'
+import type { AIMappingResult, DisplayConfig } from '../types'
 
 const OFFLINE_MSG =
   'You are currently offline. Importing new lists requires an internet connection. Please move to an area with signal and try again.'
 
-type Stage = 'idle' | 'preview' | 'importing' | 'done'
+type Stage = 'idle' | 'analyzing' | 'preview' | 'importing' | 'done'
+
+/** Apply the user's per-column role overrides on top of a base DisplayConfig. */
+function applyOverrides(
+  base: DisplayConfig,
+  headers: string[],
+  overrides: Record<string, RoleKey>,
+): DisplayConfig {
+  const result: DisplayConfig = {
+    descName: base.descName,
+    idName: base.idName,
+    grpName: base.grpName,
+    qtyNames: [...base.qtyNames],
+    ctxNames: [...base.ctxNames],
+  }
+
+  // First, strip any header that has been overridden to a different role
+  const cleared = (h: string) => {
+    if (result.idName === h) result.idName = ''
+    if (result.descName === h) result.descName = ''
+    if (result.grpName === h) result.grpName = null
+    result.qtyNames = result.qtyNames.filter(x => x !== h)
+    result.ctxNames = result.ctxNames.filter(x => x !== h)
+  }
+
+  for (const h of headers) {
+    const role = overrides[h]
+    if (!role) continue
+    cleared(h)
+    if (role === 'idName')   result.idName = h
+    if (role === 'descName') result.descName = h
+    if (role === 'grpName')  result.grpName = h
+    if (role === 'qtyNames' && !result.qtyNames.includes(h)) result.qtyNames.push(h)
+    if (role === 'ctxNames' && !result.ctxNames.includes(h)) result.ctxNames.push(h)
+    // 'unmapped' just leaves it cleared
+  }
+
+  return result
+}
 
 export default function ImportView() {
   const [stage, setStage] = useState<Stage>('idle')
   const [parsed, setParsed] = useState<ParsedFile | null>(null)
+  const [aiResult, setAiResult] = useState<AIMappingResult | null>(null)
+  const [mappingSource, setMappingSource] = useState<MappingSource>('auto')
+  const [overrides, setOverrides] = useState<Record<string, RoleKey>>({})
   const [listName, setListName] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [parseError, setParseError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const { importRFE, importing, error: storeError } = useRealtimeStore()
+  const { importRFE, error: storeError } = useRealtimeStore()
   const { setCurrentRfeId, setActiveTab } = useAppStore()
   const { isOnline } = useOnlineStatus()
   const [offlineNotice, setOfflineNotice] = useState('')
 
   const handleFile = useCallback(async (file: File) => {
     setParseError('')
+    setAiResult(null)
+    setOverrides({})
     try {
+      // Step 1 — parse locally (works offline)
       const result = await parseFile(file)
       setParsed(result)
-      // Auto-generate list name from file name (strip extension)
       setListName(file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' '))
+
+      // Step 2 — AI mapping (only if online)
+      if (!navigator.onLine) {
+        console.log('[Import] Offline — skipping AI mapping, using fuzzy fallback')
+        setMappingSource('auto')
+        setStage('preview')
+        return
+      }
+
+      setStage('analyzing')
+      const sampleRows = buildSampleRows(result.headers, result.rows, 5)
+      const ai = await aiMapColumns(result.headers, sampleRows, result.fileName)
+
+      if (ai) {
+        const aiConfig = mergeAIMapping(ai, result.headers)
+        setParsed({ ...result, displayConfig: aiConfig })
+        setAiResult(ai)
+        setMappingSource('ai')
+      } else {
+        // Backend failed — keep the fuzzy DisplayConfig parseFile already produced
+        setMappingSource('auto')
+      }
       setStage('preview')
     } catch (err) {
       setParseError(err instanceof Error ? err.message : String(err))
+      setStage('idle')
     }
   }, [])
 
@@ -47,13 +116,21 @@ export default function ImportView() {
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) handleFile(file)
-    e.target.value = '' // reset so same file can be re-selected
+    e.target.value = ''
   }
 
+  const handleOverride = useCallback((header: string, role: RoleKey) => {
+    setOverrides(o => ({ ...o, [header]: role }))
+    // Once user touches anything, mark source as manual for the indicator dot
+    setMappingSource(s => s === 'ai' ? 'ai' : 'manual')
+  }, [])
+
+  const effectiveConfig: DisplayConfig | null = parsed
+    ? applyOverrides(parsed.displayConfig, parsed.headers, overrides)
+    : null
+
   const handleImport = async () => {
-    if (!parsed || !listName.trim()) return
-    // Double-check connectivity right before the network call. Parsing and
-    // preview work offline, but the actual multi-table insert requires Supabase.
+    if (!parsed || !effectiveConfig || !listName.trim()) return
     if (!navigator.onLine) {
       console.log('[Import] Blocked — device is offline')
       setOfflineNotice(OFFLINE_MSG)
@@ -67,30 +144,32 @@ export default function ImportView() {
         parsed.fileName,
         parsed.headers,
         parsed.rows,
-        parsed.displayConfig
+        effectiveConfig,
       )
       setStage('done')
-      // After a short delay, navigate to the new checklist
       setTimeout(() => {
         setCurrentRfeId(rfeId)
         setActiveTab('checklist')
         setStage('idle')
         setParsed(null)
+        setAiResult(null)
+        setOverrides({})
       }, 1200)
     } catch (err) {
       console.log('[Import] Failed:', err)
-      setStage('preview') // error shown via storeError
+      setStage('preview')
     }
   }
 
   const reset = () => {
     setStage('idle')
     setParsed(null)
+    setAiResult(null)
+    setOverrides({})
     setParseError('')
     setListName('')
   }
 
-  // ── Done state ──
   if (stage === 'done') {
     return (
       <div className="view-container">
@@ -111,7 +190,6 @@ export default function ImportView() {
     <div className="view-container" style={{ overflowY: 'auto' }}>
       <div className="import-container">
 
-        {/* Offline notice — parsing/preview still works, the Supabase write does not */}
         {showOfflineBanner && (
           <div className="offline-banner" role="status">
             <WifiOff size={18} style={{ flexShrink: 0, marginTop: 1 }} />
@@ -121,11 +199,13 @@ export default function ImportView() {
               </strong>
               {offlineNotice || OFFLINE_MSG}
               {parsed && ' Your file selection is kept — tap Import again when you\u2019re back online.'}
+              <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text3)' }}>
+                Offline — using automatic column detection only.
+              </div>
             </div>
           </div>
         )}
 
-        {/* Drop zone */}
         <div
           className={`dropzone${dragOver ? ' drag-over' : ''}`}
           onDragOver={e => { e.preventDefault(); setDragOver(true) }}
@@ -145,24 +225,57 @@ export default function ImportView() {
           />
         </div>
 
-        {/* Parse error */}
         {parseError && (
           <div className="import-error">
             {parseError}
           </div>
         )}
 
-        {/* Column preview + import form */}
-        {parsed && stage !== 'importing' && (
+        {/* AI analyzing indicator */}
+        {stage === 'analyzing' && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '12px 14px',
+              background: 'var(--green-50, var(--green-light))',
+              border: '1px solid var(--green-light)',
+              borderRadius: 'var(--radius)',
+              color: 'var(--green-dark)',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            <div
+              className="spinner"
+              style={{
+                width: 16, height: 16,
+                border: '2px solid var(--green-light)',
+                borderTopColor: 'var(--green)',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite',
+              }}
+            />
+            <Sparkles size={14} />
+            <span>AI analyzing columns…</span>
+          </div>
+        )}
+
+        {/* Preview + import form */}
+        {parsed && effectiveConfig && stage !== 'importing' && stage !== 'analyzing' && (
           <>
             <ColumnPreview
               headers={parsed.headers}
               rows={parsed.rows}
-              displayConfig={parsed.displayConfig}
+              displayConfig={effectiveConfig}
               fileName={parsed.fileName}
+              overrides={overrides}
+              source={mappingSource}
+              aiResult={aiResult}
+              onOverride={handleOverride}
             />
 
-            {/* List name */}
             <div style={{ background: 'var(--card-bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: '14px 16px' }}>
               <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
                 List Name
@@ -176,7 +289,6 @@ export default function ImportView() {
               />
             </div>
 
-            {/* Store error */}
             {storeError && <div className="import-error">{storeError}</div>}
 
             <button
@@ -197,7 +309,6 @@ export default function ImportView() {
           </>
         )}
 
-        {/* Importing spinner */}
         {stage === 'importing' && (
           <div className="empty-state" style={{ padding: '20px 0' }}>
             <div className="spinner" />
@@ -205,7 +316,6 @@ export default function ImportView() {
           </div>
         )}
 
-        {/* Help text when idle */}
         {stage === 'idle' && !parseError && (
           <div style={{ background: 'var(--card-bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: '16px' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)', marginBottom: 8 }}>
@@ -214,7 +324,7 @@ export default function ImportView() {
             {[
               ['CSV', 'Any delimiter, any headers'],
               ['XLSX / XLS', 'First sheet is used'],
-              ['Auto-detect', 'ID, description, qty, category, tags'],
+              ['AI-Enhanced', 'Smart column mapping with offline fallback'],
             ].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)', width: 80, flexShrink: 0 }}>{k}</span>
