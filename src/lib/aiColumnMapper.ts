@@ -13,19 +13,25 @@ export async function aiMapColumns(
   headers: string[],
   sampleRows: string[][],
   fileName: string,
+  userDescription?: string,
 ): Promise<AIMappingResult | null> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
 
   try {
+    const body: Record<string, unknown> = {
+      headers,
+      sample_rows: sampleRows,
+      file_name: fileName,
+    }
+    if (userDescription && userDescription.trim()) {
+      body.user_description = userDescription.trim()
+    }
+
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        headers,
-        sample_rows: sampleRows,
-        file_name: fileName,
-      }),
+      body: JSON.stringify(body),
       signal: ctrl.signal,
     })
 

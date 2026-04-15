@@ -1,9 +1,35 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
 import { getDisplayPriority } from '../lib/displayPriority'
 import type { Item, DisplayConfig } from '../types'
+
+/** Find the header that maps to a canonical field via aiFieldMap or fuzzy match. */
+function findHeaderForCanonical(
+  displayConfig: DisplayConfig,
+  canonical: string,
+  fuzzyNeedles: string[],
+): string | null {
+  if (displayConfig.aiFieldMap) {
+    for (const [h, f] of Object.entries(displayConfig.aiFieldMap)) {
+      if (f === canonical) return h
+    }
+  }
+  // Fallback: fuzzy header-text match
+  const allHeaders = [
+    displayConfig.idName,
+    displayConfig.descName,
+    displayConfig.grpName ?? '',
+    ...displayConfig.qtyNames,
+    ...displayConfig.ctxNames,
+  ].filter(Boolean) as string[]
+  for (const h of allHeaders) {
+    const n = h.toLowerCase()
+    if (fuzzyNeedles.some(needle => n === needle || n.includes(needle))) return h
+  }
+  return null
+}
 
 interface Props {
   item: Item
@@ -118,6 +144,24 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
   const showQtyInput = qtyNum > 1
   const storedQtyFound = state?.qty_found ?? null
 
+  // Size column — used for the always-visible size pill
+  const sizeHeader = findHeaderForCanonical(displayConfig, 'size', ['size', 'dimension', 'dim'])
+  const sizeValue = sizeHeader ? item.data[sizeHeader] : ''
+
+  // Partial / full-found state derived from qty_found vs. required quantity
+  const qtyFoundNum = storedQtyFound ?? 0
+  const isPartial = qtyFoundNum > 0 && qtyNum > 0 && qtyFoundNum < qtyNum
+  const isFullyFound = qtyNum > 0 && qtyFoundNum >= qtyNum
+
+  // Auto-check when qty_found reaches the required quantity and the item isn't
+  // already marked found. Keeps the card state coherent when the user works
+  // via the quantity input instead of the checkbox.
+  useEffect(() => {
+    if (isFullyFound && !isChecked && userName) {
+      toggleCheck(item.id, item.rfe_id, true, userName)
+    }
+  }, [isFullyFound, isChecked, userName, item.id, item.rfe_id, toggleCheck])
+
   // Grid fields (Make, Model, Serial, Year, Status) from ctxNames
   const gridFields = ctxNames.filter(c => isGridField(c))
   // Secondary identifier derived from a composite column — e.g. equipment_code
@@ -186,7 +230,10 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
     : null
 
   return (
-    <div className={`item-card${isChecked ? ' checked' : ''}${hasConflict ? ' conflict' : ''}`}>
+    <div
+      className={`item-card${isChecked ? ' checked' : ''}${hasConflict ? ' conflict' : ''}${isPartial ? ' partial' : ''}`}
+      style={isPartial ? { background: 'var(--amber-light, #fef3c7)', borderColor: 'var(--amber, #f59e0b)' } : undefined}
+    >
       {hasConflict && (
         <div className="item-conflict-badge" title="Checked by multiple users while offline">
           <AlertTriangle size={12} />
@@ -249,15 +296,69 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
             </div>
           )}
 
-          {/* Qty tags */}
-          {qtyNames.map(q => {
-            const v = item.data[q]
-            return v ? (
-              <span key={q} className="item-tag qty" style={{ marginTop: 4, display: 'inline-block' }}>
-                {q}: {v}
+          {/* Always-visible Size + Qty pills (line 3) — never hidden behind expand */}
+          {(sizeValue || qtyNum > 0) && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+              {sizeValue && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '2px 8px',
+                    borderRadius: 10,
+                    background: 'var(--border-light, #e5e7eb)',
+                    color: 'var(--text2)',
+                  }}
+                >
+                  Size: {sizeValue}
+                </span>
+              )}
+              {qtyNum > 0 && (
+                <span
+                  className="item-tag qty"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    padding: '2px 8px',
+                    borderRadius: 10,
+                    background: 'var(--green-light)',
+                    color: 'var(--green-dark)',
+                  }}
+                >
+                  Qty: {qtyNum}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Partial quantity indicator */}
+          {isPartial && (
+            <div
+              style={{
+                marginTop: 6,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 700,
+                color: 'var(--amber-dark, #b45309)',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  letterSpacing: 0.5,
+                  padding: '1px 6px',
+                  borderRadius: 4,
+                  background: 'var(--amber, #f59e0b)',
+                  color: '#fff',
+                }}
+              >
+                PARTIAL
               </span>
-            ) : null
-          })}
+              <span>{qtyFoundNum} / {qtyNum} found</span>
+            </div>
+          )}
 
           {/* Checked timestamp */}
           {isChecked && checkedAt && (

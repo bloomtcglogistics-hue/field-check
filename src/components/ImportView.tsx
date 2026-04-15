@@ -4,6 +4,7 @@ import { parseFile, type ParsedFile } from '../lib/fileParser'
 import { aiMapColumns, buildSampleRows } from '../lib/aiColumnMapper'
 import { mergeAIMapping } from '../lib/columnDetector'
 import { applyAIPostProcessing } from '../lib/aiPostProcess'
+import { detectReportType } from '../lib/reportType'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
 import { useOnlineStatus } from '../lib/useOnlineStatus'
@@ -60,6 +61,7 @@ export default function ImportView() {
   const [mappingSource, setMappingSource] = useState<MappingSource>('auto')
   const [overrides, setOverrides] = useState<Record<string, RoleKey>>({})
   const [listName, setListName] = useState('')
+  const [listDescription, setListDescription] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [parseError, setParseError] = useState('')
   const [aiNotices, setAiNotices] = useState<string[]>([])
@@ -91,7 +93,7 @@ export default function ImportView() {
 
       setStage('analyzing')
       const sampleRows = buildSampleRows(result.headers, result.rows, 5)
-      const ai = await aiMapColumns(result.headers, sampleRows, result.fileName)
+      const ai = await aiMapColumns(result.headers, sampleRows, result.fileName, listDescription)
 
       if (ai) {
         // Dedupe duplicate field claims, apply extraction hints to every row,
@@ -148,12 +150,17 @@ export default function ImportView() {
     setOfflineNotice('')
     setStage('importing')
     try {
+      const trimmedDesc = listDescription.trim()
       const rfeId = await importRFE(
         listName.trim(),
         parsed.fileName,
         parsed.headers,
         parsed.rows,
         effectiveConfig,
+        {
+          description: trimmedDesc || null,
+          report_type: detectReportType(trimmedDesc),
+        },
       )
       setStage('done')
       setTimeout(() => {
@@ -163,6 +170,7 @@ export default function ImportView() {
         setParsed(null)
         setAiResult(null)
         setOverrides({})
+        setListDescription('')
       }, 1200)
     } catch (err) {
       console.log('[Import] Failed:', err)
@@ -177,6 +185,7 @@ export default function ImportView() {
     setOverrides({})
     setParseError('')
     setListName('')
+    setListDescription('')
     setAiNotices([])
   }
 
@@ -322,6 +331,24 @@ export default function ImportView() {
                 onChange={e => setListName(e.target.value)}
                 placeholder="e.g. Hercs Equipment — Site A"
               />
+            </div>
+
+            <div style={{ background: 'var(--card-bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: '14px 16px' }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
+                List Description (optional)
+              </label>
+              <input
+                className="name-input"
+                type="text"
+                value={listDescription}
+                onChange={e => setListDescription(e.target.value)}
+                placeholder="e.g., Night shift piping materials, Crane rigging hardware..."
+              />
+              {listDescription.trim() && (
+                <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)' }}>
+                  Report type: <strong style={{ color: 'var(--green-dark)' }}>{detectReportType(listDescription)}</strong>
+                </div>
+              )}
             </div>
 
             {storeError && <div className="import-error">{storeError}</div>}

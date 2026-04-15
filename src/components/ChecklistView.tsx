@@ -7,7 +7,62 @@ import SearchBar from './SearchBar'
 import FilterBar from './FilterBar'
 import ItemCard from './ItemCard'
 import ConflictBanner from './ConflictBanner'
-import type { Item } from '../types'
+import type { Item, DisplayConfig } from '../types'
+
+/** Parse values like `1/2"`, `3/4`, `1 1/2"`, `2`, `12.5` into a comparable
+ *  number. Returns NaN if no numeric content is found. Used to sort Size
+ *  columns in the expected fractional-ascending order. */
+function parseSize(raw: string): number {
+  if (!raw) return NaN
+  const s = raw.trim().replace(/["']/g, '')
+  // "1 1/2" — whole + fraction
+  const mixed = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)/)
+  if (mixed) {
+    const a = parseFloat(mixed[1])
+    const n = parseFloat(mixed[2])
+    const d = parseFloat(mixed[3])
+    if (d !== 0) return a + n / d
+  }
+  // "1/2" — pure fraction
+  const frac = s.match(/^(\d+)\s*\/\s*(\d+)/)
+  if (frac) {
+    const n = parseFloat(frac[1])
+    const d = parseFloat(frac[2])
+    if (d !== 0) return n / d
+  }
+  // Plain number, possibly followed by a unit
+  const num = s.match(/^-?\d+(?:\.\d+)?/)
+  if (num) return parseFloat(num[0])
+  return NaN
+}
+
+function parseNumericQty(raw: string): number {
+  if (!raw) return NaN
+  const n = parseFloat(raw.replace(/,/g, '.').replace(/[^\d.\-]/g, ''))
+  return isNaN(n) ? NaN : n
+}
+
+/** Find header mapped to `canonical`, falling back to fuzzy header names. */
+function findHeaderForCanonical(
+  config: DisplayConfig,
+  canonical: string,
+  fuzzyNeedles: string[],
+): string | null {
+  if (config.aiFieldMap) {
+    for (const [h, f] of Object.entries(config.aiFieldMap)) {
+      if (f === canonical) return h
+    }
+  }
+  const all = [
+    config.idName, config.descName, config.grpName ?? '',
+    ...config.qtyNames, ...config.ctxNames,
+  ].filter(Boolean) as string[]
+  for (const h of all) {
+    const n = h.toLowerCase()
+    if (fuzzyNeedles.some(needle => n === needle || n.includes(needle))) return h
+  }
+  return null
+}
 
 function NameModal({ onSave }: { onSave: (name: string) => void }) {
   const [value, setValue] = useState('')
@@ -94,11 +149,31 @@ export default function ChecklistView() {
     }
 
     // Sort
-    if (sortCol) {
+    if (sortCol && currentRfe) {
+      const cfg = currentRfe.display_config
+      const sizeH = findHeaderForCanonical(cfg, 'size', ['size', 'dimension', 'dim'])
+      const qtyH = cfg.qtyNames[0] ?? findHeaderForCanonical(cfg, 'quantity', ['qty', 'quantity', 'count'])
+      const isSize = sortCol === sizeH
+      const isQty = sortCol === qtyH
       list.sort((a, b) => {
-        const av = (a.data[sortCol] ?? '').toLowerCase()
-        const bv = (b.data[sortCol] ?? '').toLowerCase()
-        const cmp = av.localeCompare(bv)
+        const av = a.data[sortCol] ?? ''
+        const bv = b.data[sortCol] ?? ''
+        let cmp: number
+        if (isSize) {
+          const an = parseSize(av); const bn = parseSize(bv)
+          if (isNaN(an) && isNaN(bn)) cmp = 0
+          else if (isNaN(an)) cmp = 1
+          else if (isNaN(bn)) cmp = -1
+          else cmp = an - bn
+        } else if (isQty) {
+          const an = parseNumericQty(av); const bn = parseNumericQty(bv)
+          if (isNaN(an) && isNaN(bn)) cmp = 0
+          else if (isNaN(an)) cmp = 1
+          else if (isNaN(bn)) cmp = -1
+          else cmp = an - bn
+        } else {
+          cmp = av.toLowerCase().localeCompare(bv.toLowerCase())
+        }
         return sortDir === 'asc' ? cmp : -cmp
       })
     } else {
@@ -154,12 +229,21 @@ export default function ChecklistView() {
     }
   }
 
-  // Column headers for sort — id + desc + up to 3 context cols
-  const sortHeaders = currentRfe ? [
-    currentRfe.display_config.idName,
-    currentRfe.display_config.descName,
-    ...currentRfe.display_config.ctxNames.slice(0, 3),
-  ].filter((h, i, arr) => h && arr.indexOf(h) === i) : []
+  // Column headers for sort — id + desc + up to 3 context cols + always Size/Qty when present
+  const sortHeaders = (() => {
+    if (!currentRfe) return []
+    const cfg = currentRfe.display_config
+    const sizeH = findHeaderForCanonical(cfg, 'size', ['size', 'dimension', 'dim'])
+    const qtyH = cfg.qtyNames[0] ?? findHeaderForCanonical(cfg, 'quantity', ['qty', 'quantity', 'count'])
+    const base = [
+      cfg.idName,
+      cfg.descName,
+      ...cfg.ctxNames.slice(0, 3),
+      sizeH ?? '',
+      qtyH ?? '',
+    ]
+    return base.filter((h, i, arr) => h && arr.indexOf(h) === i) as string[]
+  })()
 
   if (!currentRfeId || !currentRfe) {
     return (
@@ -266,7 +350,7 @@ export default function ChecklistView() {
       )}
 
       {/* Item list */}
-      <div className="view-container" style={{ overflowY: 'auto' }}>
+      <div className="view-container" style={{ overflowY: 'auto', paddingBottom: 100 }}>
         {filtered.length === 0 ? (
           <div className="empty-state">
             <FileX size={40} />

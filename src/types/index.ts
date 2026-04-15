@@ -7,6 +7,10 @@ export interface RFEIndex {
   headers: string[]
   display_config: DisplayConfig
   created_at: string
+  /** User-entered description at import time (e.g. "Night shift piping materials"). */
+  description?: string | null
+  /** Derived report type — drives PDF title. See src/lib/reportType.ts */
+  report_type?: string | null
 }
 
 export interface DisplayConfig {

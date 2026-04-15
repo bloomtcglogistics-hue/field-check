@@ -46,7 +46,7 @@ interface RealtimeState {
   toggleCheck: (itemId: string, rfeId: string, checked: boolean, userName: string) => Promise<void>
   updateNote: (itemId: string, rfeId: string, note: string) => Promise<void>
   updateQtyFound: (itemId: string, rfeId: string, qtyFound: number | null) => Promise<void>
-  importRFE: (name: string, fileName: string, headers: string[], rows: Record<string, string>[], displayConfig: DisplayConfig) => Promise<string>
+  importRFE: (name: string, fileName: string, headers: string[], rows: Record<string, string>[], displayConfig: DisplayConfig, meta?: { description?: string | null; report_type?: string | null }) => Promise<string>
   deleteRFE: (rfeId: string) => Promise<void>
   resetChecks: (rfeId: string) => Promise<void>
   selectAllFiltered: (itemIds: string[], rfeId: string, checked: boolean, userName: string) => Promise<void>
@@ -548,7 +548,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
     },
 
     // ── Import a new RFE from parsed CSV/XLSX ─────────────────────────────────
-    importRFE: async (name, fileName, headers, rows, displayConfig) => {
+    importRFE: async (name, fileName, headers, rows, displayConfig, meta) => {
       // Import REQUIRES being online — server assigns the UUID
       if (!navigator.onLine) {
         const msg = 'Import requires an internet connection. Please move to an area with signal to import new lists.'
@@ -559,9 +559,19 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
       set({ importing: true, error: null })
 
       try {
+        const insertRow: Record<string, unknown> = {
+          name,
+          file_name: fileName,
+          count: rows.length,
+          headers,
+          display_config: displayConfig,
+        }
+        if (meta?.description != null) insertRow.description = meta.description
+        if (meta?.report_type != null) insertRow.report_type = meta.report_type
+
         const { data: rfe, error: rfeErr } = await supabase
           .from('fc_rfe_index')
-          .insert({ name, file_name: fileName, count: rows.length, headers, display_config: displayConfig })
+          .insert(insertRow)
           .select()
           .single()
 

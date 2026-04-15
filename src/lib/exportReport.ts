@@ -13,6 +13,9 @@ const BORDER_GRAY: RGB = [229, 231, 235]
 const PROGRESS_TRACK: RGB = [229, 231, 235]
 const FOUND_BG: RGB = [240, 253, 244]
 const MISSING_BG: RGB = [255, 247, 237]
+const AMBER: RGB = [245, 158, 11]
+const AMBER_DARK: RGB = [180, 83, 9]
+const AMBER_BG: RGB = [254, 243, 199]
 const BLACK: RGB = [17, 24, 39]
 const WHITE: RGB = [255, 255, 255]
 
@@ -43,10 +46,24 @@ export function generatePDFReport(
   const pageH = doc.internal.pageSize.getHeight()
   const M = 43.2 // 0.6" margin
 
-  const { descName, idName, ctxNames } = rfe.display_config
+  const { descName, idName, ctxNames, qtyNames } = rfe.display_config
+  const qtyColName = qtyNames[0] ?? null
+  const getRequiredQty = (item: Item): number => {
+    if (!qtyColName) return 0
+    const n = parseInt(item.data[qtyColName] ?? '0', 10)
+    return isNaN(n) ? 0 : n
+  }
+  const partialSet = new Set<string>()
+  for (const it of items) {
+    const s = checkStates.get(it.id)
+    const req = getRequiredQty(it)
+    const found = s?.qty_found ?? 0
+    if (found > 0 && req > 0 && found < req) partialSet.add(it.id)
+  }
   const total = items.length
   const checkedCount = items.filter(it => checkStates.get(it.id)?.checked).length
-  const missing = total - checkedCount
+  const partialCount = partialSet.size
+  const missing = total - checkedCount - partialCount
   const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0
 
   const now = new Date()
@@ -87,12 +104,24 @@ export function generatePDFReport(
   doc.line(M, y, pageW - M, y)
   y += 22
 
-  // Title
+  // Title — smart from report_type, fallback to FIELD VERIFICATION REPORT
+  const reportTitle = (rfe.report_type && rfe.report_type.trim())
+    ? rfe.report_type.toUpperCase()
+    : 'FIELD VERIFICATION REPORT'
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(16)
   setText(doc, NAVY)
-  doc.text('EQUIPMENT VERIFICATION REPORT', pageW / 2, y, { align: 'center' })
+  doc.text(reportTitle, pageW / 2, y, { align: 'center' })
   y += 18
+
+  // Description subtitle (user-entered at import time)
+  if (rfe.description && rfe.description.trim()) {
+    doc.setFont('helvetica', 'italic')
+    doc.setFontSize(11)
+    setText(doc, GRAY)
+    doc.text(rfe.description.trim(), pageW / 2, y, { align: 'center' })
+    y += 16
+  }
 
   // Date / time
   doc.setFont('helvetica', 'normal')
@@ -129,15 +158,17 @@ export function generatePDFReport(
   doc.line(M, y, pageW - M, y)
   y += 18
 
-  // ── Section 3: Summary statistics (4 boxes) ──────────────────────────
-  const boxGap = 10
-  const boxW = (pageW - 2 * M - 3 * boxGap) / 4
+  // ── Section 3: Summary statistics (5 boxes) ──────────────────────────
+  const boxGap = 8
+  const boxCount = 5
+  const boxW = (pageW - 2 * M - (boxCount - 1) * boxGap) / boxCount
   const boxH = 56
 
   const stats: Array<{ label: string; value: string; color: RGB }> = [
     { label: 'TOTAL', value: String(total), color: GRAY },
     { label: 'FOUND', value: String(checkedCount), color: GREEN },
-    { label: 'MISSING', value: String(missing), color: ORANGE },
+    { label: 'PARTIAL', value: String(partialCount), color: AMBER },
+    { label: 'MISSING', value: String(Math.max(0, missing)), color: ORANGE },
     { label: 'COMPLETE', value: `${pct}%`, color: GREEN },
   ]
 
@@ -180,6 +211,7 @@ export function generatePDFReport(
   const body = items.map((item, idx) => {
     const state = checkStates.get(item.id)
     const isChecked = state?.checked ?? false
+    const isPartial = partialSet.has(item.id)
     const id = item.data[idName] || ''
     const desc = item.data[descName] || ''
     const note = state?.note || ''
@@ -192,12 +224,23 @@ export function generatePDFReport(
     const auditLine = by ? `\u2014 ${by}${ts ? ` @ ${ts}` : ''}` : ''
     const noteText = [note, auditLine].filter(Boolean).join('\n')
 
+    let statusText: string
+    if (isPartial) {
+      const req = getRequiredQty(item)
+      const found = state?.qty_found ?? 0
+      statusText = `PARTIAL (${found}/${req})`
+    } else if (isChecked) {
+      statusText = 'FOUND'
+    } else {
+      statusText = 'MISSING'
+    }
+
     return [
       String(idx + 1),
       id,
       desc,
       ...extraCols.map(c => item.data[c] || ''),
-      isChecked ? 'FOUND' : 'MISSING',
+      statusText,
       noteText,
     ]
   })
@@ -231,7 +274,7 @@ export function generatePDFReport(
     columnStyles: {
       0: { cellWidth: 24, halign: 'center', textColor: GRAY },
       1: { fontStyle: 'bold', cellWidth: 70 },
-      [statusColIdx]: { fontStyle: 'bold', halign: 'center', cellWidth: 62 },
+      [statusColIdx]: { fontStyle: 'bold', halign: 'center', cellWidth: 78 },
       [notesColIdx]: { textColor: GRAY, fontStyle: 'italic' },
     },
     didParseCell(data: CellHookData) {
@@ -240,13 +283,18 @@ export function generatePDFReport(
       const item = items[rowIdx]
       if (!item) return
       const isChecked = checkStates.get(item.id)?.checked ?? false
+      const isPartial = partialSet.has(item.id)
 
-      data.cell.styles.fillColor = isChecked
-        ? (isAlt(rowIdx) ? LIGHT_GRAY : FOUND_BG)
-        : (isAlt(rowIdx) ? LIGHT_GRAY : MISSING_BG)
+      if (isPartial) {
+        data.cell.styles.fillColor = isAlt(rowIdx) ? LIGHT_GRAY : AMBER_BG
+      } else if (isChecked) {
+        data.cell.styles.fillColor = isAlt(rowIdx) ? LIGHT_GRAY : FOUND_BG
+      } else {
+        data.cell.styles.fillColor = isAlt(rowIdx) ? LIGHT_GRAY : MISSING_BG
+      }
 
       if (data.column.index === statusColIdx) {
-        data.cell.styles.textColor = isChecked ? GREEN : ORANGE
+        data.cell.styles.textColor = isPartial ? AMBER_DARK : (isChecked ? GREEN : ORANGE)
         data.cell.styles.fontStyle = 'bold'
       }
       if (data.column.index === notesColIdx) {
