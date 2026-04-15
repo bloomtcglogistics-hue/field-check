@@ -211,9 +211,10 @@ export function generatePDFReport(
 
   // ── Section 4: Item table ────────────────────────────────────────────
   const extraCols = ctxNames.slice(0, 3)
-  const head: string[] = ['#', idName || 'ID', descName || 'Description', ...extraCols, 'Qty', 'Status', 'Notes']
-  const qtyColIdx = 3 + extraCols.length
-  const statusColIdx = qtyColIdx + 1
+  const head: string[] = ['#', idName || 'ID', descName || 'Description', ...extraCols, 'Req', 'Found', 'Status', 'Notes']
+  const reqColIdx = 3 + extraCols.length
+  const foundColIdx = reqColIdx + 1
+  const statusColIdx = foundColIdx + 1
   const notesColIdx = head.length - 1
 
   const body = items.map((item, idx) => {
@@ -233,12 +234,21 @@ export function generatePDFReport(
     const noteText = [note, auditLine].filter(Boolean).join('\n')
 
     const req = getRequiredQty(item)
-    const qtyText = req > 0 ? String(req) : '\u2014'
+    const reqText = req > 0 ? String(req) : '\u2014'
+    const qtyFound = state?.qty_found
+    let foundNum: number
+    if (isPartial) {
+      foundNum = qtyFound ?? 0
+    } else if (isChecked) {
+      foundNum = qtyFound && qtyFound > 0 ? qtyFound : req
+    } else {
+      foundNum = 0
+    }
+    const foundText = foundNum > 0 ? String(foundNum) : '\u2014'
 
     let statusText: string
     if (isPartial) {
-      const found = state?.qty_found ?? 0
-      statusText = `PARTIAL (${found}/${req})`
+      statusText = `PARTIAL (${foundNum}/${req})`
     } else if (isChecked) {
       statusText = 'FOUND'
     } else {
@@ -250,7 +260,8 @@ export function generatePDFReport(
       id,
       desc,
       ...extraCols.map(c => item.data[c] || ''),
-      qtyText,
+      reqText,
+      foundText,
       statusText,
       noteText,
     ]
@@ -285,7 +296,8 @@ export function generatePDFReport(
     columnStyles: {
       0: { cellWidth: 24, halign: 'center', textColor: GRAY },
       1: { fontStyle: 'bold', cellWidth: 70 },
-      [qtyColIdx]: { halign: 'center', cellWidth: 36 },
+      [reqColIdx]: { halign: 'center', cellWidth: 36 },
+      [foundColIdx]: { halign: 'center', cellWidth: 36 },
       [statusColIdx]: { fontStyle: 'bold', halign: 'center', cellWidth: 78 },
       [notesColIdx]: { textColor: GRAY, fontStyle: 'italic' },
     },
