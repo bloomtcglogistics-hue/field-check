@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Package, Upload, Search, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
@@ -31,6 +31,13 @@ export default function InventoryView() {
   const { setActiveTab, setCurrentRfeId } = useAppStore()
   const { rfeList, loading, deleteRFE, resetChecks } = useRealtimeStore()
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+
+  // 150ms debounce — avoids filtering on every keystroke at large list sizes
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 150)
+    return () => clearTimeout(t)
+  }, [searchQuery])
 
   const handleOpen = (rfeId: string) => {
     setCurrentRfeId(rfeId)
@@ -38,8 +45,8 @@ export default function InventoryView() {
   }
 
   const filtered = useMemo(
-    () => rfeList.filter(rfe => matchesQuery(rfe, searchQuery)),
-    [rfeList, searchQuery],
+    () => rfeList.filter(rfe => matchesQuery(rfe, debouncedQuery)),
+    [rfeList, debouncedQuery],
   )
 
   if (loading) {
@@ -59,10 +66,10 @@ export default function InventoryView() {
         <div className="empty-state">
           <Package size={56} />
           <h3>No checklists yet</h3>
-          <p>Import a file to get started.</p>
+          <p>Import a CSV or Excel file to start verifying items in the field.</p>
           <button
             onClick={() => setActiveTab('import')}
-            style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', background: 'var(--green)', color: '#fff', borderRadius: 8, fontSize: 14, fontWeight: 700 }}
+            style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 22px', background: 'var(--green)', color: '#fff', borderRadius: 8, fontSize: 14, fontWeight: 700, minHeight: 44 }}
           >
             <Upload size={16} /> Import List
           </button>
@@ -75,10 +82,11 @@ export default function InventoryView() {
     <div className="view-container" style={{ display: 'flex', flexDirection: 'column' }}>
       <div className="inventory-search">
         <div className="inventory-search-wrap">
-          <Search size={15} style={{ color: 'var(--text3)', flexShrink: 0 }} />
+          <Search size={15} style={{ color: 'var(--text3)', flexShrink: 0 }} aria-hidden="true" />
           <input
             type="search"
             placeholder="Search by title, reference ID, or date…"
+            aria-label="Search checklists"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             autoComplete="off"
@@ -96,8 +104,12 @@ export default function InventoryView() {
             </button>
           )}
         </div>
-        <div className="inventory-search-count">
-          {searchQuery
+        <div
+          className="inventory-search-count"
+          role="status"
+          aria-live="polite"
+        >
+          {debouncedQuery
             ? `${filtered.length} of ${rfeList.length} checklist${rfeList.length === 1 ? '' : 's'}`
             : `${rfeList.length} checklist${rfeList.length === 1 ? '' : 's'}`}
         </div>
@@ -108,14 +120,14 @@ export default function InventoryView() {
           <div className="empty-state">
             <Search size={40} />
             <h3>No matches</h3>
-            <p>No checklists match &ldquo;{searchQuery}&rdquo;. Try a different search.</p>
+            <p>No checklists match &ldquo;{debouncedQuery}&rdquo;. Try a different search.</p>
           </div>
         ) : (
           <div className="inventory-list">
             {filtered.map(rfe => (
               <InventoryRFECardWrapper
                 key={rfe.id}
-                rfeId={rfe.id}
+                rfe={rfe}
                 onOpen={() => handleOpen(rfe.id)}
                 onDelete={() => deleteRFE(rfe.id)}
                 onReset={() => resetChecks(rfe.id)}
@@ -129,6 +141,7 @@ export default function InventoryView() {
       <div className="fabs">
         <button
           className="fab fab-outline"
+          aria-label="Import new list"
           title="Import new list"
           onClick={() => setActiveTab('import')}
         >
@@ -139,19 +152,19 @@ export default function InventoryView() {
   )
 }
 
-// Reactive wrapper: derives checkedCount from live Zustand state so inventory
-// cards update in real time when checks change (including resets).
+// Reactive wrapper: receives the RFEIndex by prop (parent has it from the
+// filtered list) so we don't do a linear find-by-id per card on every store
+// update. Only the live checkedCount / conflictCount need store selectors.
 function InventoryRFECardWrapper({
-  rfeId, onOpen, onDelete, onReset,
+  rfe, onOpen, onDelete, onReset,
 }: {
-  rfeId: string
+  rfe: RFEIndex
   onOpen: () => void
   onDelete: () => void
   onReset: () => void
 }) {
   const { currentRfeId } = useAppStore()
-
-  const rfe = useRealtimeStore(s => s.rfeList.find(r => r.id === rfeId)!)
+  const rfeId = rfe.id
 
   // For the currently-loaded RFE, compute count from the live checkStates map
   // (updated by realtime events and optimistic toggles). For others, use the
@@ -171,8 +184,6 @@ function InventoryRFECardWrapper({
   const conflictCount = useRealtimeStore(s =>
     s.conflicts.filter(c => c.rfeId === rfeId).length,
   )
-
-  if (!rfe) return null
 
   return (
     <RFECard

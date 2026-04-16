@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react'
 import { ScanLine, X } from 'lucide-react'
 import type { Item, DisplayConfig } from '../types'
 import { getDisplayPriority } from '../lib/displayPriority'
@@ -8,6 +8,12 @@ interface Props {
   displayConfig: DisplayConfig | undefined
   onMatch: (itemId: string) => void
   onNoMatch: (code: string) => void
+}
+
+export interface ScanBarHandle {
+  /** Submit a code from outside the input (used by the global keyboard-wedge listener). */
+  submitCode: (code: string) => void
+  focus: () => void
 }
 
 interface MatchResult {
@@ -54,10 +60,18 @@ function primaryTitleFor(item: Item, config: DisplayConfig | undefined): string 
   return display.primary || display.secondary || item.id
 }
 
-export default function ScanBar({ items, displayConfig, onMatch, onNoMatch }: Props) {
+function vibrate(pattern: number | number[]) {
+  try { navigator.vibrate?.(pattern) } catch { /* unsupported */ }
+}
+
+const ScanBar = forwardRef<ScanBarHandle, Props>(function ScanBar(
+  { items, displayConfig, onMatch, onNoMatch }: Props,
+  handleRef,
+) {
   const [value, setValue] = useState('')
   const [matches, setMatches] = useState<Item[]>([])
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [liveMsg, setLiveMsg] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
 
@@ -73,17 +87,21 @@ export default function ScanBar({ items, displayConfig, onMatch, onNoMatch }: Pr
     return () => document.removeEventListener('mousedown', handler)
   }, [dropdownOpen])
 
-  const handleSubmit = () => {
-    const code = value.trim()
+  const submit = (rawCode: string) => {
+    const code = rawCode.trim()
     if (!code) return
     const result = findMatches(items, code)
 
     if (result.items.length === 0) {
+      vibrate([40, 60, 40])
+      setLiveMsg(`No match for "${code}"`)
       onNoMatch(code)
       return
     }
 
     if (result.items.length === 1) {
+      vibrate(15)
+      setLiveMsg(`Match found — ${result.tier === 'exact' ? 'exact' : 'partial'}`)
       onMatch(result.items[0].id)
       setValue('')
       setDropdownOpen(false)
@@ -91,30 +109,45 @@ export default function ScanBar({ items, displayConfig, onMatch, onNoMatch }: Pr
       return
     }
 
+    vibrate(10)
+    setLiveMsg(`${result.items.length} possible matches`)
     setMatches(result.items.slice(0, 20))
     setDropdownOpen(true)
   }
 
+  useImperativeHandle(handleRef, () => ({
+    submitCode: (code: string) => {
+      setValue(code)
+      submit(code)
+    },
+    focus: () => inputRef.current?.focus(),
+  // submit closes over items/config; recompute handle when they change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [items, displayConfig])
+
   const pick = (itemId: string) => {
+    vibrate(15)
     onMatch(itemId)
     setValue('')
     setDropdownOpen(false)
     setMatches([])
+    setLiveMsg('Item selected')
   }
 
   return (
     <div className="scan-section" ref={wrapRef}>
       <div className="scan-wrap">
-        <ScanLine size={16} style={{ color: 'var(--green)', flexShrink: 0 }} />
+        <ScanLine size={16} style={{ color: 'var(--green)', flexShrink: 0 }} aria-hidden="true" />
         <input
           ref={inputRef}
           className="scan-input"
           type="text"
           inputMode="text"
           placeholder="Scan barcode or paste item code..."
+          aria-label="Scan or paste item code"
           value={value}
           onChange={e => setValue(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') handleSubmit() }}
+          onKeyDown={e => { if (e.key === 'Enter') submit(value) }}
           autoComplete="off"
           autoCorrect="off"
           autoCapitalize="off"
@@ -132,17 +165,30 @@ export default function ScanBar({ items, displayConfig, onMatch, onNoMatch }: Pr
       </div>
 
       {dropdownOpen && matches.length > 0 && (
-        <div className="scan-dropdown">
+        <div className="scan-dropdown" role="listbox" aria-label="Matching items">
           <div className="scan-dropdown-head">
             {matches.length} match{matches.length === 1 ? '' : 'es'} — pick one
           </div>
           {matches.map(m => (
-            <button key={m.id} className="scan-dropdown-item" onClick={() => pick(m.id)}>
+            <button
+              key={m.id}
+              role="option"
+              aria-selected="false"
+              className="scan-dropdown-item"
+              onClick={() => pick(m.id)}
+            >
               {primaryTitleFor(m, displayConfig)}
             </button>
           ))}
         </div>
       )}
+
+      {/* Live region — screen readers announce match/no-match without visual change */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {liveMsg}
+      </div>
     </div>
   )
-}
+})
+
+export default ScanBar

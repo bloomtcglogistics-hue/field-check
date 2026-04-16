@@ -1,10 +1,10 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { FileX, Download } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { generatePDFReport, generateHTMLReportLegacy, downloadReport } from '../lib/exportReport'
 import SearchBar from './SearchBar'
-import ScanBar from './ScanBar'
+import ScanBar, { type ScanBarHandle } from './ScanBar'
 import FilterBar from './FilterBar'
 import ItemCard from './ItemCard'
 import ConflictBanner from './ConflictBanner'
@@ -103,6 +103,7 @@ export default function ChecklistView() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [scanHighlightId, setScanHighlightId] = useState<string | null>(null)
   const [scanRevision, setScanRevision] = useState(0)
+  const scanBarRef = useRef<ScanBarHandle>(null)
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
@@ -129,6 +130,49 @@ export default function ChecklistView() {
     setScanHighlightId(itemId)
     setScanRevision(r => r + 1)
   }
+
+  // Global keyboard-wedge scanner listener — hardware scanners type characters
+  // very quickly and terminate with Enter. We buffer rapid input when no text
+  // field is focused and submit it through the ScanBar.
+  useEffect(() => {
+    if (!currentRfeId) return
+    let buffer = ''
+    let lastKeyTs = 0
+    const BURST_MS = 40 // inter-character gap typical of wedge scanners
+    const MIN_LEN = 3   // avoid stray keystrokes triggering scans
+
+    const isTypingTarget = (el: EventTarget | null): boolean => {
+      if (!(el instanceof HTMLElement)) return false
+      const tag = el.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+      if (el.isContentEditable) return true
+      return false
+    }
+
+    const handler = (e: KeyboardEvent) => {
+      // Ignore modifier combos and typing into other fields
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (isTypingTarget(e.target)) return
+
+      const now = performance.now()
+      if (now - lastKeyTs > BURST_MS) buffer = ''
+      lastKeyTs = now
+
+      if (e.key === 'Enter') {
+        if (buffer.length >= MIN_LEN) {
+          const code = buffer
+          buffer = ''
+          e.preventDefault()
+          scanBarRef.current?.submitCode(code)
+        }
+        return
+      }
+      if (e.key.length === 1) buffer += e.key
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [currentRfeId])
 
   const groups = useMemo(() => {
     if (!currentRfe?.display_config.grpName) return []
@@ -306,6 +350,7 @@ export default function ChecklistView() {
 
       {/* Scan / paste barcode */}
       <ScanBar
+        ref={scanBarRef}
         items={items}
         displayConfig={currentRfe.display_config}
         onMatch={handleScanMatch}
@@ -407,12 +452,12 @@ export default function ChecklistView() {
           className="fab fab-primary"
           title="Export report"
           onClick={() => {
-            console.log('[Export] Generating PDF report (online=' + navigator.onLine + ')')
+            if (import.meta.env.DEV) console.log('[Export] Generating PDF report (online=' + navigator.onLine + ')')
             try {
               generatePDFReport(currentRfe, items, checkStates, userName)
               showToast(navigator.onLine ? 'PDF report downloaded' : 'PDF report downloaded (offline)')
             } catch (err) {
-              console.error('[Export] PDF failed, falling back to HTML:', err)
+              if (import.meta.env.DEV) console.error('[Export] PDF failed, falling back to HTML:', err)
               const html = generateHTMLReportLegacy(currentRfe, items, checkStates, userName)
               downloadReport(html, currentRfe)
               showToast('Report downloaded (HTML fallback)')

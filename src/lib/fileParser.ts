@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx'
 import type { DisplayConfig } from '../types'
 import { detectColumns } from './columnDetector'
 
@@ -12,7 +11,11 @@ export interface ParsedFile {
 export async function parseFile(file: File): Promise<ParsedFile> {
   const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
 
-  let workbook: XLSX.WorkBook
+  // Lazy-load xlsx (~400KB gz) only when an import is actually performed.
+  // Keeps it out of the first-paint bundle for field users who mostly browse.
+  const XLSX = await import('xlsx')
+
+  let workbook: import('xlsx').WorkBook
 
   if (ext === 'csv') {
     const text = await file.text()

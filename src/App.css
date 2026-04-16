@@ -4,10 +4,14 @@
   --green-dark: #15803D;
   --green-light: #DCFCE7;
   --green-50: #F0FDF4;
-  --orange: #F97316;
+  --orange: #C2410C;
   --orange-light: #FFF7ED;
-  --gold: #EAB308;
+  --gold: #B45309;
   --gold-bg: #FEF9C3;
+  /* Amber family — WCAG AA compliant on white (5.74:1+) for sunlight readability */
+  --amber: #B45309;
+  --amber-dark: #92400E;
+  --amber-light: #FEF3C7;
   --bg: #F1F5F9;
   --card-bg: #FFFFFF;
   --border: #E2E8F0;
@@ -38,6 +42,9 @@
   --shadow-md: 0 4px 6px rgba(0,0,0,0.25);
   --shadow-lg: 0 10px 15px rgba(0,0,0,0.35);
   --gold-bg: #422006;
+  --amber: #F59E0B;
+  --amber-dark: #FCD34D;
+  --amber-light: #422006;
 }
 
 * {
@@ -1233,8 +1240,10 @@ mark {
   color: var(--text3);
   display: flex;
   align-items: center;
-  min-width: 20px;
-  min-height: 20px;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -8px -8px -8px 0;
   background: none;
   border: none;
   cursor: pointer;
@@ -1320,8 +1329,9 @@ mark {
 .inventory-search-wrap input::placeholder { color: var(--text3); }
 .inventory-search-clear {
   color: var(--text3);
-  display: flex; align-items: center;
-  min-width: 20px; min-height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px;
+  margin: -8px -8px -8px 0;
   background: none; border: none; cursor: pointer;
 }
 .inventory-search-count {
@@ -1352,9 +1362,9 @@ mark {
 /* Reference ID pill — muted gray */
 .rfe-ref-pill {
   display: inline-block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 3px 8px;
+  padding: 6px 10px;
   border-radius: 10px;
   background: var(--border-light, #e5e7eb);
   color: var(--text2);
@@ -1363,4 +1373,53 @@ mark {
 [data-theme="dark"] .rfe-ref-pill {
   background: #1F2937;
   color: #D1D5DB;
+}
+
+/* ── Screen-reader only utility (visually hidden but announced) ── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Reduced-motion — kill pulses / spins / slide transitions ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .item-card.scan-hit {
+    animation: none !important;
+    box-shadow: 0 0 0 3px var(--green-light);
+  }
+  .live-dot.disconnected {
+    animation: none !important;
+    opacity: 0.7;
+  }
+  .spinner {
+    animation: none !important;
+    border-top-color: var(--green);
+  }
+  .progress-fill {
+    transition: none !important;
+  }
+  .slide-panel {
+    transition: none !important;
+  }
+  .panel-overlay {
+    transition: none !important;
+  }
+  .toast {
+    transition: opacity 0.001ms !important;
+    transform: translateX(-50%) translateY(0) !important;
+  }
 }

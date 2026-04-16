@@ -44,17 +44,32 @@ export default function RFECard({
           <div className="rfe-name">{rfe.name}</div>
           <div className="rfe-badge-group">
             {hasConflicts && (
-              <span className="rfe-badge conflict" title="Unresolved offline conflicts">
-                <AlertTriangle size={11} />
+              <span
+                className="rfe-badge conflict"
+                title="Unresolved offline conflicts"
+                role="status"
+                aria-label={`${conflictCount} ${conflictCount === 1 ? 'conflict' : 'conflicts'} — multiple users checked while offline`}
+              >
+                <AlertTriangle size={11} aria-hidden="true" />
                 {conflictCount} {conflictCount === 1 ? 'CONFLICT' : 'CONFLICTS'}
               </span>
             )}
-            <span className={`rfe-badge ${badge}`}>{badgeLabel}</span>
+            <span
+              className={`rfe-badge ${badge}`}
+              role="status"
+              aria-label={`Status: ${badgeLabel.toLowerCase()} — ${checkedCount} of ${total} verified (${pct}%)`}
+            >
+              {badgeLabel}
+            </span>
           </div>
         </div>
         {rfe.reference_id && (
           <div style={{ marginTop: 6 }}>
-            <span className="rfe-ref-pill" title="Reference ID">
+            <span
+              className="rfe-ref-pill"
+              title="Reference ID"
+              aria-label={`Reference ID ${rfe.reference_id}`}
+            >
               Ref: {rfe.reference_id}
             </span>
           </div>

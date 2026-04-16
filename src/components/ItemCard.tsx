@@ -209,6 +209,7 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
 
   const handleCheck = useCallback(() => {
     if (!userName) { onNeedName(); return }
+    try { navigator.vibrate?.(isChecked ? 8 : 15) } catch { /* unsupported */ }
     toggleCheck(item.id, item.rfe_id, !isChecked, userName)
   }, [isChecked, userName, item.id, item.rfe_id, toggleCheck, onNeedName])
 
@@ -250,7 +251,7 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
     <div
       ref={cardRef}
       className={`item-card${isChecked ? ' checked' : ''}${hasConflict ? ' conflict' : ''}${isPartial ? ' partial' : ''}${scanHighlight ? ' scan-hit' : ''}`}
-      style={isPartial ? { background: 'var(--amber-light, #fef3c7)', borderColor: 'var(--amber, #f59e0b)' } : undefined}
+      style={isPartial ? { background: 'var(--amber-light)', borderColor: 'var(--amber)' } : undefined}
     >
       {hasConflict && (
         <div className="item-conflict-badge" title="Checked by multiple users while offline">
@@ -352,6 +353,8 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
           {/* Partial quantity indicator */}
           {isPartial && (
             <div
+              role="status"
+              aria-label={`Partially found: ${qtyFoundNum} of ${qtyNum}`}
               style={{
                 marginTop: 6,
                 display: 'flex',
@@ -359,22 +362,23 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
                 gap: 6,
                 fontSize: 12,
                 fontWeight: 700,
-                color: 'var(--amber-dark, #b45309)',
+                color: 'var(--amber-dark)',
               }}
             >
               <span
                 style={{
                   fontSize: 10,
                   letterSpacing: 0.5,
-                  padding: '1px 6px',
+                  padding: '2px 7px',
                   borderRadius: 4,
-                  background: 'var(--amber, #f59e0b)',
+                  background: 'var(--amber)',
                   color: '#fff',
                 }}
+                aria-hidden="true"
               >
                 PARTIAL
               </span>
-              <span>{qtyFoundNum} / {qtyNum} found</span>
+              <span aria-hidden="true">{qtyFoundNum} / {qtyNum} found</span>
             </div>
           )}
 

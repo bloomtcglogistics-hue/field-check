@@ -62,6 +62,7 @@ export default function ImportView() {
   const [overrides, setOverrides] = useState<Record<string, RoleKey>>({})
   const [listName, setListName] = useState('')
   const [listDescription, setListDescription] = useState('')
+  const [reportTypeOverride, setReportTypeOverride] = useState('')
   const [referenceId, setReferenceId] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [parseError, setParseError] = useState('')
@@ -86,7 +87,7 @@ export default function ImportView() {
 
       // Step 2 — AI mapping (only if online)
       if (!navigator.onLine) {
-        console.log('[Import] Offline — skipping AI mapping, using fuzzy fallback')
+        if (import.meta.env.DEV) console.log('[Import] Offline — skipping AI mapping, using fuzzy fallback')
         setMappingSource('auto')
         setStage('preview')
         return
@@ -116,7 +117,7 @@ export default function ImportView() {
       setParseError(err instanceof Error ? err.message : String(err))
       setStage('idle')
     }
-  }, [])
+  }, [listDescription])
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -144,7 +145,7 @@ export default function ImportView() {
   const handleImport = async () => {
     if (!parsed || !effectiveConfig || !listName.trim()) return
     if (!navigator.onLine) {
-      console.log('[Import] Blocked — device is offline')
+      if (import.meta.env.DEV) console.log('[Import] Blocked — device is offline')
       setOfflineNotice(OFFLINE_MSG)
       return
     }
@@ -153,6 +154,7 @@ export default function ImportView() {
     try {
       const trimmedDesc = listDescription.trim()
       const trimmedRefId = referenceId.trim()
+      const trimmedOverride = reportTypeOverride.trim()
       const rfeId = await importRFE(
         listName.trim(),
         parsed.fileName,
@@ -161,7 +163,7 @@ export default function ImportView() {
         effectiveConfig,
         {
           description: trimmedDesc || null,
-          report_type: detectReportType(trimmedDesc),
+          report_type: trimmedOverride || detectReportType(trimmedDesc),
           reference_id: trimmedRefId || null,
         },
       )
@@ -174,10 +176,11 @@ export default function ImportView() {
         setAiResult(null)
         setOverrides({})
         setListDescription('')
+        setReportTypeOverride('')
         setReferenceId('')
       }, 1200)
     } catch (err) {
-      console.log('[Import] Failed:', err)
+      if (import.meta.env.DEV) console.log('[Import] Failed:', err)
       setStage('preview')
     }
   }
@@ -190,6 +193,7 @@ export default function ImportView() {
     setParseError('')
     setListName('')
     setListDescription('')
+    setReportTypeOverride('')
     setReferenceId('')
     setAiNotices([])
   }
@@ -349,11 +353,31 @@ export default function ImportView() {
                 onChange={e => setListDescription(e.target.value)}
                 placeholder="e.g., Night shift piping materials, Crane rigging hardware..."
               />
-              {listDescription.trim() && (
+              {listDescription.trim() && !reportTypeOverride.trim() && (
                 <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)' }}>
                   Report type: <strong style={{ color: 'var(--green-dark)' }}>{detectReportType(listDescription)}</strong>
+                  <span style={{ marginLeft: 6, opacity: 0.7 }}>(auto-detected — override below)</span>
                 </div>
               )}
+            </div>
+
+            <div style={{ background: 'var(--card-bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: '14px 16px' }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
+                Report Type Override (optional)
+              </label>
+              <input
+                className="name-input"
+                type="text"
+                value={reportTypeOverride}
+                onChange={e => setReportTypeOverride(e.target.value)}
+                placeholder={`Default: ${detectReportType(listDescription.trim())}`}
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)' }}>
+                Appears as the PDF report title. Leave blank to use the auto-detected type.
+              </div>
             </div>
 
             <div style={{ background: 'var(--card-bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: '14px 16px' }}>
