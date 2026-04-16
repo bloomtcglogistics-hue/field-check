@@ -6,10 +6,12 @@ import type { Item, DisplayConfig } from '../types'
 
 const DEFAULT_ITEM_HEIGHT = 80
 const GROUP_HEADER_HEIGHT = 36
+const BOTTOM_SPACER_HEIGHT = 300
 
 type FlatEntry =
   | { type: 'header'; group: string }
   | { type: 'item'; item: Item }
+  | { type: 'spacer' }
 
 interface ItemData {
   entries: FlatEntry[]
@@ -39,20 +41,20 @@ interface Props {
  *  height cache (so heights survive list reordering). */
 function keyForEntry(entry: FlatEntry | undefined): string | null {
   if (!entry) return null
-  return entry.type === 'header' ? `header:${entry.group}` : entry.item.id
+  if (entry.type === 'header') return `header:${entry.group}`
+  if (entry.type === 'spacer') return 'spacer'
+  return entry.item.id
 }
 
-/** Bottom padding keeps the last items above the single speed-dial FAB.
- *  Trigger is a 52px circle sitting at `bottom: nav-h (64) + 16 = 80px` from
- *  the viewport, so its top edge lives 132px from the bottom. We pad 300px
- *  for a generous gutter so the last item's expand chevron is always
- *  tappable, even when the speed-dial menu is open or the bottom nav
- *  briefly shifts. The speed-dial menu pops UPWARD from the trigger and
- *  overlays scroll content on purpose; users have already scrolled to the
- *  end by then. */
+/** Bottom-gutter is implemented as a sentinel spacer entry at the end of
+ *  the virtual list (see `entries` useMemo + Row renderer below). A padding
+ *  hack on the inner element DOES NOT WORK here: the global `box-sizing:
+ *  border-box` makes react-window's inline `height` absorb any padding, so
+ *  scrollHeight never grows. Giving the spacer its own itemSize is the only
+ *  way to get real scroll clearance past the fixed-position speed-dial FAB. */
 const InnerListElement = forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<'div'>>(
   function InnerListElement(props, ref) {
-    return <div ref={ref} {...props} style={{ ...props.style, paddingBottom: 300 }} />
+    return <div ref={ref} {...props} />
   }
 )
 
@@ -98,6 +100,13 @@ const Row = memo(function Row({ index, style, data }: ListChildComponentProps<It
         </MeasuredDiv>
       </div>
     )
+  }
+
+  // Sentinel spacer — no MeasuredDiv (fixed size) and nothing to render.
+  // react-window allocates `style.height` from getItemSize, so this just
+  // reserves scrollable space past the last real item.
+  if (entry.type === 'spacer') {
+    return <div style={style} aria-hidden="true" />
   }
 
   const { item } = entry
@@ -146,6 +155,10 @@ export default function VirtualItemList({
       if (group) flat.push({ type: 'header', group })
       for (const item of items) flat.push({ type: 'item', item })
     }
+    // Sentinel spacer: fixed-height phantom row so the last real item can
+    // scroll well above the fixed-position speed-dial FAB. See the comment
+    // on InnerListElement for why padding can't do this job.
+    flat.push({ type: 'spacer' })
     return flat
   }, [grouped])
 
@@ -172,6 +185,8 @@ export default function VirtualItemList({
   const getItemSize = useCallback((index: number): number => {
     const entry = entries[index]
     if (!entry) return DEFAULT_ITEM_HEIGHT
+    // Spacer is a fixed-size scroll gutter — skip the height cache entirely.
+    if (entry.type === 'spacer') return BOTTOM_SPACER_HEIGHT
     const key = keyForEntry(entry)!
     const cached = sizeById.current.get(key)
     if (cached !== undefined) return cached
