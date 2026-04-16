@@ -1,10 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, FileEdit, Play, FileDown, Lock, AlertTriangle, CheckCircle2, Circle, MinusCircle } from 'lucide-react'
+import { ArrowLeft, FileEdit, Play, FileDown, Lock, AlertTriangle, CheckCircle2, Circle, MinusCircle, XCircle } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { generatePDFReport } from '../lib/exportReport'
 import { getDisplayPriority } from '../lib/displayPriority'
-import type { RFEIndex } from '../types'
+import type { RFEIndex, DisplayConfig } from '../types'
+
+/** Mirrors ItemCard's size-column lookup so pills display the same value. */
+function findSizeHeader(cfg: DisplayConfig): string | null {
+  const needles = ['size', 'dimension', 'dim']
+  if (cfg.aiFieldMap) {
+    for (const [h, f] of Object.entries(cfg.aiFieldMap)) if (f === 'size') return h
+  }
+  const all = [cfg.idName, cfg.descName, cfg.grpName ?? '', ...cfg.qtyNames, ...cfg.ctxNames]
+    .filter(Boolean) as string[]
+  for (const h of all) {
+    const n = h.toLowerCase()
+    if (needles.some(nd => n === nd || n.includes(nd))) return h
+  }
+  return null
+}
 
 interface Props {
   rfe: RFEIndex
@@ -81,6 +96,9 @@ export default function ReadOnlyDetailView({ rfe, onBack }: Props) {
     return m
   }, [rfe.display_config])
 
+  const sizeHeader = useMemo(() => findSizeHeader(rfe.display_config), [rfe.display_config])
+  const qtyColName = rfe.display_config.qtyNames[0] ?? null
+
   const importedDate = new Date(rfe.imported_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   })
@@ -147,39 +165,80 @@ export default function ReadOnlyDetailView({ rfe, onBack }: Props) {
             const primary = display.primary || item.id
             const secondary = display.secondary
             const isChecked = !!s?.checked
-            const qtyFound = s?.qty_found
+            const rawFound = s?.qty_found
+            const qtyFound = rawFound ?? 0
+            const reqRaw = qtyColName ? parseInt(item.data[qtyColName] ?? '0', 10) : 0
+            const required = isNaN(reqRaw) ? 0 : reqRaw
+            const hasReq = required > 0
+            const isPartial = qtyFound > 0 && hasReq && qtyFound < required
+            const isFound = isChecked && !isPartial
+            // Treat unchecked as MISSING only once the list has been finalized —
+            // before then the inspector is still working, so "unchecked" is
+            // genuinely unknown rather than missing.
+            const isMissing = !isFound && !isPartial && isFinalized
+
+            const sizeValue = sizeHeader ? item.data[sizeHeader] : ''
             const note = s?.note?.startsWith('CONFLICT:') ? null : s?.note
 
-            let icon: React.ReactNode = <Circle size={16} aria-hidden="true" />
-            let cls = 'readonly-item'
-            if (isChecked && qtyFound != null && qtyFound > 0) {
-              icon = <CheckCircle2 size={16} aria-hidden="true" />
-              cls += ' checked'
-            } else if (qtyFound != null && qtyFound > 0) {
-              icon = <MinusCircle size={16} aria-hidden="true" />
-              cls += ' partial'
+            let statusCls = 'unchecked'
+            let icon: React.ReactNode = <Circle size={18} aria-hidden="true" />
+            let statusLabel: React.ReactNode = null
+
+            if (isFound) {
+              statusCls = 'found'
+              icon = <CheckCircle2 size={18} aria-hidden="true" />
+              statusLabel = <span className="readonly-status-label found">FOUND</span>
+            } else if (isPartial) {
+              statusCls = 'partial'
+              icon = <MinusCircle size={18} aria-hidden="true" />
+              statusLabel = (
+                <span className="readonly-status-label partial">
+                  PARTIAL · {qtyFound} of {required} found
+                </span>
+              )
+            } else if (isMissing) {
+              statusCls = 'missing'
+              icon = <XCircle size={18} aria-hidden="true" />
+              statusLabel = <span className="readonly-status-label missing">MISSING</span>
             }
 
+            const checkedAt = s?.checked_at
+              ? new Date(s.checked_at).toLocaleString([], {
+                  month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                })
+              : null
+            const checkedBy = s?.checked_by
+
             return (
-              <div key={item.id} className={cls}>
+              <div key={item.id} className={`readonly-item ${statusCls}`}>
                 <div className="readonly-item-icon">{icon}</div>
                 <div className="readonly-item-text">
                   <div className="readonly-item-primary">{primary}</div>
                   {secondary && (
                     <div className="readonly-item-secondary">{secondary}</div>
                   )}
+                  {(sizeValue || hasReq) && (
+                    <div className="readonly-item-pills">
+                      {sizeValue && (
+                        <span className="readonly-pill size">Size: {sizeValue}</span>
+                      )}
+                      {hasReq && (
+                        <span className="readonly-pill qty">Qty: {required}</span>
+                      )}
+                    </div>
+                  )}
+                  {statusLabel && (
+                    <div className="readonly-status-row">{statusLabel}</div>
+                  )}
+                  {(isFound || isPartial) && checkedAt && (
+                    <div className="readonly-item-audit">
+                      {checkedBy ? `${checkedBy} · ` : ''}{checkedAt}
+                    </div>
+                  )}
                   {note && (
-                    <div className="readonly-item-note">Note: {note}</div>
+                    <div className="readonly-item-note">{note}</div>
                   )}
                 </div>
-                {qtyFound != null && (
-                  <div
-                    className="readonly-item-qty"
-                    aria-label={`${qtyFound} found`}
-                  >
-                    {qtyFound}
-                  </div>
-                )}
               </div>
             )
           })
