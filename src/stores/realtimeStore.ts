@@ -46,7 +46,7 @@ interface RealtimeState {
   toggleCheck: (itemId: string, rfeId: string, checked: boolean, userName: string) => Promise<void>
   updateNote: (itemId: string, rfeId: string, note: string) => Promise<void>
   updateQtyFound: (itemId: string, rfeId: string, qtyFound: number | null) => Promise<void>
-  importRFE: (name: string, fileName: string, headers: string[], rows: Record<string, string>[], displayConfig: DisplayConfig, meta?: { description?: string | null; report_type?: string | null }) => Promise<string>
+  importRFE: (name: string, fileName: string, headers: string[], rows: Record<string, string>[], displayConfig: DisplayConfig, meta?: { description?: string | null; report_type?: string | null; reference_id?: string | null }) => Promise<string>
   deleteRFE: (rfeId: string) => Promise<void>
   resetChecks: (rfeId: string) => Promise<void>
   selectAllFiltered: (itemIds: string[], rfeId: string, checked: boolean, userName: string) => Promise<void>
@@ -568,6 +568,7 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
         }
         if (meta?.description != null) insertRow.description = meta.description
         if (meta?.report_type != null) insertRow.report_type = meta.report_type
+        if (meta?.reference_id != null) insertRow.reference_id = meta.reference_id
 
         const { data: rfe, error: rfeErr } = await supabase
           .from('fc_rfe_index')

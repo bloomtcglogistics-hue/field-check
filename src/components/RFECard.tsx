@@ -52,6 +52,13 @@ export default function RFECard({
             <span className={`rfe-badge ${badge}`}>{badgeLabel}</span>
           </div>
         </div>
+        {rfe.reference_id && (
+          <div style={{ marginTop: 6 }}>
+            <span className="rfe-ref-pill" title="Reference ID">
+              Ref: {rfe.reference_id}
+            </span>
+          </div>
+        )}
         <div className="rfe-meta">
           <span className="rfe-meta-main">{total} items · {date}</span>
           <span className="rfe-meta-file">{rfe.file_name}</span>

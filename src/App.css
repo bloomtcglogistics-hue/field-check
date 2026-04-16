@@ -1290,3 +1290,77 @@ mark {
   40%  { box-shadow: 0 0 0 6px rgba(22,163,74,0.00), 0 0 20px rgba(22,163,74,0.35); }
   100% { box-shadow: 0 0 0 3px var(--green-light),   0 0 12px rgba(22,163,74,0.15); }
 }
+
+/* ── Inventory search bar ── */
+.inventory-search {
+  background: var(--card-bg);
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.inventory-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card-bg);
+  border-radius: 9999px;
+  padding: 9px 14px;
+  border: 1.5px solid var(--border);
+  transition: border-color 0.15s;
+  min-height: 44px;
+}
+.inventory-search-wrap:focus-within { border-color: var(--green); }
+.inventory-search-wrap input {
+  flex: 1; border: none; background: none; font-size: 14px;
+  color: var(--text); outline: none;
+}
+.inventory-search-wrap input::placeholder { color: var(--text3); }
+.inventory-search-clear {
+  color: var(--text3);
+  display: flex; align-items: center;
+  min-width: 20px; min-height: 20px;
+  background: none; border: none; cursor: pointer;
+}
+.inventory-search-count {
+  font-size: 12px; color: var(--text3); padding-left: 6px;
+}
+
+/* ── Inventory grid: 1 col mobile, 2+ on wider screens ── */
+.inventory-list {
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 640px) {
+  .inventory-list { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+}
+
+/* Hover effect on cards */
+.rfe-card {
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.rfe-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.10);
+  border-color: var(--border);
+}
+
+/* Reference ID pill — muted gray */
+.rfe-ref-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: var(--border-light, #e5e7eb);
+  color: var(--text2);
+  letter-spacing: 0.02em;
+}
+[data-theme="dark"] .rfe-ref-pill {
+  background: #1F2937;
+  color: #D1D5DB;
+}

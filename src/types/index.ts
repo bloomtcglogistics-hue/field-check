@@ -11,6 +11,8 @@ export interface RFEIndex {
   description?: string | null
   /** Derived report type — drives PDF title. See src/lib/reportType.ts */
   report_type?: string | null
+  /** User-entered external reference for the list (e.g. "RFE-2024-001", "Job #12345"). */
+  reference_id?: string | null
 }
 
 export interface DisplayConfig {

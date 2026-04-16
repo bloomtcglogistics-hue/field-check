@@ -62,6 +62,7 @@ export default function ImportView() {
   const [overrides, setOverrides] = useState<Record<string, RoleKey>>({})
   const [listName, setListName] = useState('')
   const [listDescription, setListDescription] = useState('')
+  const [referenceId, setReferenceId] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [parseError, setParseError] = useState('')
   const [aiNotices, setAiNotices] = useState<string[]>([])
@@ -151,6 +152,7 @@ export default function ImportView() {
     setStage('importing')
     try {
       const trimmedDesc = listDescription.trim()
+      const trimmedRefId = referenceId.trim()
       const rfeId = await importRFE(
         listName.trim(),
         parsed.fileName,
@@ -160,6 +162,7 @@ export default function ImportView() {
         {
           description: trimmedDesc || null,
           report_type: detectReportType(trimmedDesc),
+          reference_id: trimmedRefId || null,
         },
       )
       setStage('done')
@@ -171,6 +174,7 @@ export default function ImportView() {
         setAiResult(null)
         setOverrides({})
         setListDescription('')
+        setReferenceId('')
       }, 1200)
     } catch (err) {
       console.log('[Import] Failed:', err)
@@ -186,6 +190,7 @@ export default function ImportView() {
     setParseError('')
     setListName('')
     setListDescription('')
+    setReferenceId('')
     setAiNotices([])
   }
 
@@ -349,6 +354,23 @@ export default function ImportView() {
                   Report type: <strong style={{ color: 'var(--green-dark)' }}>{detectReportType(listDescription)}</strong>
                 </div>
               )}
+            </div>
+
+            <div style={{ background: 'var(--card-bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: '14px 16px' }}>
+              <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)', display: 'block', marginBottom: 8 }}>
+                Reference ID (optional)
+              </label>
+              <input
+                className="name-input"
+                type="text"
+                value={referenceId}
+                onChange={e => setReferenceId(e.target.value)}
+                placeholder="e.g., RFE-2024-001, Job #12345, RFP #789..."
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
             </div>
 
             {storeError && <div className="import-error">{storeError}</div>}
