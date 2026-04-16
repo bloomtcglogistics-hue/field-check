@@ -38,6 +38,8 @@ interface Props {
   onNeedName: () => void
   hasPendingMutation?: boolean
   hasConflict?: boolean
+  scanHighlight?: boolean
+  scanRevision?: number
 }
 
 /** Gold fuzzy highlight — wraps matching characters individually */
@@ -100,13 +102,15 @@ function isGridField(header: string): boolean {
   return GRID_FIELDS.some(g => n === g || n.includes(g))
 }
 
-export default function ItemCard({ item, displayConfig, searchQuery, onNeedName, hasPendingMutation = false, hasConflict = false }: Props) {
+export default function ItemCard({ item, displayConfig, searchQuery, onNeedName, hasPendingMutation = false, hasConflict = false, scanHighlight = false, scanRevision = 0 }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [noteValue, setNoteValue] = useState<string | null>(null)
   const [noteSaving, setNoteSaving] = useState(false)
   const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [qtyValue, setQtyValue] = useState<string>('')
   const qtyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const qtyInputRef = useRef<HTMLInputElement>(null)
 
   const { checkStates, toggleCheck, updateNote, updateQtyFound } = useRealtimeStore()
   const { userName } = useAppStore()
@@ -161,6 +165,19 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
       toggleCheck(item.id, item.rfe_id, true, userName)
     }
   }, [isFullyFound, isChecked, userName, item.id, item.rfe_id, toggleCheck])
+
+  // React to a scan hit — expand, scroll, focus qty input.
+  useEffect(() => {
+    if (!scanHighlight) return
+    setExpanded(true)
+    if (noteValue === null) setNoteValue(state?.note ?? '')
+    if (storedQtyFound !== null) setQtyValue(String(storedQtyFound))
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const t = setTimeout(() => { qtyInputRef.current?.focus(); qtyInputRef.current?.select() }, 250)
+    return () => clearTimeout(t)
+  // scanRevision lets a repeat-scan on the same item re-trigger the effect
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanHighlight, scanRevision])
 
   // Grid fields (Make, Model, Serial, Year, Status) from ctxNames
   const gridFields = ctxNames.filter(c => isGridField(c))
@@ -231,7 +248,8 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
 
   return (
     <div
-      className={`item-card${isChecked ? ' checked' : ''}${hasConflict ? ' conflict' : ''}${isPartial ? ' partial' : ''}`}
+      ref={cardRef}
+      className={`item-card${isChecked ? ' checked' : ''}${hasConflict ? ' conflict' : ''}${isPartial ? ' partial' : ''}${scanHighlight ? ' scan-hit' : ''}`}
       style={isPartial ? { background: 'var(--amber-light, #fef3c7)', borderColor: 'var(--amber, #f59e0b)' } : undefined}
     >
       {hasConflict && (
@@ -408,6 +426,7 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
                 </span>
               </label>
               <input
+                ref={qtyInputRef}
                 className="qty-found-input"
                 type="number"
                 min={0}

@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { generatePDFReport, generateHTMLReportLegacy, downloadReport } from '../lib/exportReport'
 import SearchBar from './SearchBar'
+import ScanBar from './ScanBar'
 import FilterBar from './FilterBar'
 import ItemCard from './ItemCard'
 import ConflictBanner from './ConflictBanner'
@@ -100,6 +101,8 @@ export default function ChecklistView() {
   const [toastVisible, setToastVisible] = useState(false)
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [scanHighlightId, setScanHighlightId] = useState<string | null>(null)
+  const [scanRevision, setScanRevision] = useState(0)
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
@@ -114,6 +117,17 @@ export default function ChecklistView() {
     setToastMsg(msg)
     setToastVisible(true)
     setTimeout(() => setToastVisible(false), 2200)
+  }
+
+  useEffect(() => {
+    if (!scanHighlightId) return
+    const t = setTimeout(() => setScanHighlightId(null), 3000)
+    return () => clearTimeout(t)
+  }, [scanHighlightId, scanRevision])
+
+  const handleScanMatch = (itemId: string) => {
+    setScanHighlightId(itemId)
+    setScanRevision(r => r + 1)
   }
 
   const groups = useMemo(() => {
@@ -290,6 +304,14 @@ export default function ChecklistView() {
         </div>
       </div>
 
+      {/* Scan / paste barcode */}
+      <ScanBar
+        items={items}
+        displayConfig={currentRfe.display_config}
+        onMatch={handleScanMatch}
+        onNoMatch={code => showToast(`Item not found: "${code}"`)}
+      />
+
       {/* Search */}
       <SearchBar resultCount={filtered.length} totalCount={total} />
 
@@ -370,6 +392,8 @@ export default function ChecklistView() {
                   onNeedName={() => setShowNameModal(true)}
                   hasPendingMutation={pendingItemIds.has(item.id)}
                   hasConflict={conflictItemIds.has(item.id)}
+                  scanHighlight={scanHighlightId === item.id}
+                  scanRevision={scanRevision}
                 />
               ))}
             </div>
