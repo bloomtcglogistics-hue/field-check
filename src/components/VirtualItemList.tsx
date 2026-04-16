@@ -44,14 +44,15 @@ function keyForEntry(entry: FlatEntry | undefined): string | null {
 
 /** Bottom padding keeps the last items above the single speed-dial FAB.
  *  Trigger is a 52px circle sitting at `bottom: nav-h (64) + 16 = 80px` from
- *  the viewport, so its top edge lives 132px from the bottom. We pad 160px
- *  to leave a clear 28px gutter — enough that the last item's expand chevron
- *  is always tappable, even on devices where the bottom nav hides briefly.
- *  The speed-dial menu pops UPWARD from the trigger and overlays scroll
- *  content on purpose; users have already scrolled to the end by then. */
+ *  the viewport, so its top edge lives 132px from the bottom. We pad 300px
+ *  for a generous gutter so the last item's expand chevron is always
+ *  tappable, even when the speed-dial menu is open or the bottom nav
+ *  briefly shifts. The speed-dial menu pops UPWARD from the trigger and
+ *  overlays scroll content on purpose; users have already scrolled to the
+ *  end by then. */
 const InnerListElement = forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<'div'>>(
   function InnerListElement(props, ref) {
-    return <div ref={ref} {...props} style={{ ...props.style, paddingBottom: 160 }} />
+    return <div ref={ref} {...props} style={{ ...props.style, paddingBottom: 300 }} />
   }
 )
 
