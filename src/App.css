@@ -725,6 +725,87 @@ mark {
 .fab-primary { background: var(--green); color: #fff; }
 .fab-outline { background: var(--card-bg); color: var(--green); border: 2px solid var(--green); }
 
+/* ── FAB speed-dial ── Single trigger in bottom-right that opens an upward-
+   stacked menu of actions. Replaces the old 3-FAB vertical stack so nothing
+   overlaps the last rows of the list. */
+.fab-dial {
+  position: fixed;
+  bottom: calc(var(--nav-h) + 16px);
+  right: 16px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+.fab-dial-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fab-dial-pop 0.16s ease-out;
+}
+@keyframes fab-dial-pop {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.fab-dial-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 6px 4px 14px;
+  box-shadow: var(--shadow-md);
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s, background 0.12s;
+  white-space: nowrap;
+}
+.fab-dial-item:active { transform: scale(0.96); }
+.fab-dial-item:hover { background: var(--bg); }
+.fab-dial-label { line-height: 1; }
+.fab-dial-icon {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.fab-dial-item[data-variant="draft"] .fab-dial-icon { background: #f59e0b; }
+.fab-dial-item[data-variant="resume"] .fab-dial-icon { background: #6366f1; }
+
+.fab-dial-trigger {
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s;
+}
+.fab-dial.open .fab-dial-trigger {
+  background: var(--text);
+  transform: rotate(45deg);
+}
+[data-theme="dark"] .fab-dial-item {
+  background: var(--card-bg);
+  color: var(--text);
+  border-color: var(--border);
+}
+[data-theme="dark"] .fab-dial-item:hover { background: #334155; }
+
+/* Narrow phones — pin the menu's right edge and shrink the trigger slightly */
+@media (max-width: 399px) {
+  .fab-dial { right: 12px; bottom: calc(var(--nav-h) + 12px); }
+  .fab-dial-item { font-size: 12px; padding: 3px 5px 3px 12px; min-height: 40px; }
+  .fab-dial-icon { width: 32px; height: 32px; }
+}
+
+/* Respect reduced motion — no rotate or pop animation */
+@media (prefers-reduced-motion: reduce) {
+  .fab-dial-menu { animation: none !important; }
+  .fab-dial.open .fab-dial-trigger { transform: none !important; }
+}
+
 /* ── Empty state ── */
 .empty-state {
   flex: 1; display: flex; flex-direction: column;

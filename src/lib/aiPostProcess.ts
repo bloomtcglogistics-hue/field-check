@@ -3,6 +3,64 @@ import type { AIMappingResult, ColumnMapping, ExtractionHint } from '../types'
 const RAW_SUFFIX = '__raw'
 const PART_SEPARATOR = '__part__'
 
+/** Header tokens that unambiguously identify a "description" column. Matched
+ *  as whole words against a normalised header so "Cat Class Description",
+ *  "Item Desc", "Material Descr" all qualify — but "Descriptor Code" does not
+ *  (since "descriptor" is the whole word, not "description"). */
+const DESC_HEADER_RE = /(^|\s)(description|desc|descr)(\s|$)/
+
+/** AI fields that we're willing to OVERWRITE when a column's header plainly
+ *  reads as a description. These are all "group_by family" fields — the ones
+ *  the backend tends to pick when description values happen to repeat across
+ *  rows (e.g. forklift model names). A column actually mapped to tag_number,
+ *  item_code, serial_number, etc. is left alone. */
+const GROUP_FIELDS = new Set(['category', 'type', 'class', 'group_by'])
+
+function looksLikeDescriptionHeader(header: string): boolean {
+  const n = header.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+  return DESC_HEADER_RE.test(` ${n} `)
+}
+
+/**
+ * Header-wins rule: if a column's header plainly reads as a description
+ * ("Cat Class Description", "Item Desc", etc.) but the AI mapped it to a
+ * group_by field (category / type / class), force it back to `description`.
+ *
+ * Only fires when NO other column is already mapped to description — if the
+ * AI correctly identified a real Description column, we leave this one alone
+ * and let dedupe pick the real one. This is specifically for the failure
+ * mode where the backend over-groups: every row's value is a short
+ * category-like string, so it picks `type` despite the header literally
+ * saying "Description".
+ */
+export function forceDescriptionByHeader(
+  mappings: Record<string, ColumnMapping>,
+): { mappings: Record<string, ColumnMapping>; remapped: string[] } {
+  const result: Record<string, ColumnMapping> = { ...mappings }
+  const remapped: string[] = []
+  let hasDescription = Object.values(result).some(m => m?.field === 'description')
+
+  for (const [header, mapping] of Object.entries(result)) {
+    if (!mapping) continue
+    if (mapping.field === 'description') continue
+    if (!looksLikeDescriptionHeader(header)) continue
+    if (!GROUP_FIELDS.has(mapping.field)) continue
+    if (hasDescription) continue
+
+    const prevField = mapping.field
+    result[header] = {
+      ...mapping,
+      field: 'description',
+      confidence: Math.max(Number(mapping.confidence) || 0, 0.95),
+      reason: `Header contains "description" → forced to Description (AI had chosen ${prevField})`,
+    }
+    remapped.push(header)
+    hasDescription = true
+  }
+
+  return { mappings: result, remapped }
+}
+
 /** Key where the original (uncleaned) value is preserved on a row. */
 export function rawKey(header: string): string {
   return `${header}${RAW_SUFFIX}`
@@ -164,11 +222,20 @@ export function applyAIPostProcessing(
   conflicts: MappingDedupeResult['conflicts']
   notices: string[]
 } {
-  const { mappings: cleanedMappings, conflicts } = dedupeMappingsByConfidence(ai.mappings)
+  // Step 1 — header-wins remap (e.g. "Cat Class Description" mis-mapped to
+  // `type` gets flipped back to `description` before dedupe sees it).
+  const { mappings: forced, remapped } = forceDescriptionByHeader(ai.mappings)
+
+  // Step 2 — resolve duplicate field claims by confidence.
+  const { mappings: cleanedMappings, conflicts } = dedupeMappingsByConfidence(forced)
+
   const hintsApplied = applyExtractionHints(rows, ai.extraction_hints)
   const compositePartKeys = splitCompositeFields(rows, cleanedMappings)
 
   const notices: string[] = []
+  for (const h of remapped) {
+    notices.push(`'${h}' re-classified as Description (header clearly indicates a description column).`)
+  }
   for (const c of conflicts) notices.push(conflictMessage(c))
   if (hintsApplied > 0) {
     const hintCols = (ai.extraction_hints ?? []).map(h => `'${h.source_column}'`).join(', ')

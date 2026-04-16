@@ -42,12 +42,16 @@ function keyForEntry(entry: FlatEntry | undefined): string | null {
   return entry.type === 'header' ? `header:${entry.group}` : entry.item.id
 }
 
-/** Adds bottom padding so the last items aren't hidden behind the 3-FAB stack.
- *  Stack height: 3 × 52px FAB + 2 × 12px gap = 180px, plus 80px from the nav
- *  bottom offset. We pad 240px so even the last item scrolls clear. */
+/** Bottom padding keeps the last items above the single speed-dial FAB.
+ *  Trigger is a 52px circle sitting at `bottom: nav-h (64) + 16 = 80px` from
+ *  the viewport, so its top edge lives 132px from the bottom. We pad 160px
+ *  to leave a clear 28px gutter — enough that the last item's expand chevron
+ *  is always tappable, even on devices where the bottom nav hides briefly.
+ *  The speed-dial menu pops UPWARD from the trigger and overlays scroll
+ *  content on purpose; users have already scrolled to the end by then. */
 const InnerListElement = forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<'div'>>(
   function InnerListElement(props, ref) {
-    return <div ref={ref} {...props} style={{ ...props.style, paddingBottom: 240 }} />
+    return <div ref={ref} {...props} style={{ ...props.style, paddingBottom: 160 }} />
   }
 )
 

@@ -1,5 +1,5 @@
-import { useMemo, useState, useEffect, useRef } from 'react'
-import { FileX, Download, Lock, FileEdit, Save, Play } from 'lucide-react'
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
+import { FileX, Download, Lock, FileEdit, Save, Play, X, MoreVertical } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { generatePDFReport, generateHTMLReportLegacy, downloadReport } from '../lib/exportReport'
@@ -101,6 +101,8 @@ export default function ChecklistView() {
   } = useRealtimeStore()
   const [confirmFinalize, setConfirmFinalize] = useState(false)
   const [confirmReopen, setConfirmReopen] = useState(false)
+  const [fabMenuOpen, setFabMenuOpen] = useState(false)
+  const fabContainerRef = useRef<HTMLDivElement>(null)
   const conflictItemIds = useMemo(() => new Set(conflicts.map(c => c.itemId)), [conflicts])
   const [showNameModal, setShowNameModal] = useState(false)
   const [toastMsg, setToastMsg] = useState('')
@@ -146,6 +148,26 @@ export default function ChecklistView() {
     setScanHighlightId(itemId)
     setScanRevision(r => r + 1)
   }
+
+  const closeFabMenu = useCallback(() => setFabMenuOpen(false), [])
+
+  // Escape + outside-tap close the FAB speed-dial. Only bound while open so
+  // we aren't listening globally when the menu is idle.
+  useEffect(() => {
+    if (!fabMenuOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeFabMenu() }
+    const onPointer = (e: PointerEvent) => {
+      const el = fabContainerRef.current
+      if (!el) return
+      if (e.target instanceof Node && !el.contains(e.target)) closeFabMenu()
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('pointerdown', onPointer, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointerdown', onPointer, true)
+    }
+  }, [fabMenuOpen, closeFabMenu])
 
   // Global keyboard-wedge scanner listener — hardware scanners type characters
   // very quickly and terminate with Enter. We buffer rapid input when no text
@@ -487,86 +509,109 @@ export default function ChecklistView() {
         </div>
       )}
 
-      {/* FAB stack — bottom-right column.
-          ACTIVE/DRAFT: Save (finalize), Save Draft, Export PDF
-          FINALIZED:    Re-open + Export PDF only */}
-      <div className="fabs fab-stack">
-        {!isFinalized && (
-          <>
-            <button
-              className="fab fab-save"
-              title="Finalize this list"
-              aria-label="Finalize and lock this list"
-              onClick={() => {
+      {/* FAB speed-dial — single primary trigger in bottom-right. Tap opens
+          a vertical menu of actions above the trigger; tap-outside or Escape
+          closes. Replaces the old 3-FAB stack so nothing overlaps the last
+          items in the list. */}
+      {(() => {
+        const doExportPDF = () => {
+          if (import.meta.env.DEV) console.log('[Export] Generating PDF report (online=' + navigator.onLine + ')')
+          try {
+            generatePDFReport(currentRfe, items, checkStates, userName)
+            showToast(navigator.onLine ? 'PDF report downloaded' : 'PDF report downloaded (offline)')
+          } catch (err) {
+            if (import.meta.env.DEV) console.error('[Export] PDF failed, falling back to HTML:', err)
+            const html = generateHTMLReportLegacy(currentRfe, items, checkStates, userName)
+            downloadReport(html, currentRfe)
+            showToast('Report downloaded (HTML fallback)')
+          }
+        }
+
+        type FabAction = {
+          key: string; label: string; icon: React.ReactNode
+          variant: 'primary' | 'draft' | 'resume'
+          onClick: () => void
+        }
+        const actions: FabAction[] = [
+          {
+            key: 'pdf', label: 'Export PDF', variant: 'primary',
+            icon: <Download size={18} />, onClick: doExportPDF,
+          },
+        ]
+        if (!isFinalized) {
+          actions.push({
+            key: 'finalize', label: 'Save & Finalize', variant: 'primary',
+            icon: <Save size={18} />,
+            onClick: () => {
+              if (!userName) { setShowNameModal(true); return }
+              setConfirmFinalize(true)
+            },
+          })
+          if (isDraft) {
+            actions.push({
+              key: 'resume', label: 'Resume (Active)', variant: 'resume',
+              icon: <Play size={18} />,
+              onClick: async () => {
                 if (!userName) { setShowNameModal(true); return }
-                setConfirmFinalize(true)
-              }}
-            >
-              <Save size={20} />
-            </button>
-            {!isDraft && (
-              <button
-                className="fab fab-draft"
-                title="Save as draft"
-                aria-label="Save list as draft (paused)"
-                onClick={async () => {
-                  if (!userName) { setShowNameModal(true); return }
-                  await draftRFE(currentRfeId, userName)
-                  showToast('Saved as draft')
-                }}
-              >
-                <FileEdit size={20} />
-              </button>
-            )}
-            {isDraft && (
-              <button
-                className="fab fab-draft"
-                title="Resume — return to active"
-                aria-label="Resume editing — return list to active state"
-                onClick={async () => {
-                  if (!userName) { setShowNameModal(true); return }
-                  await activateRFE(currentRfeId, userName)
-                  showToast('Resumed — list is active')
-                }}
-              >
-                <Play size={20} />
-              </button>
-            )}
-          </>
-        )}
-        {isFinalized && (
-          <button
-            className="fab fab-save"
-            title="Re-open finalized list"
-            aria-label="Re-open finalized list — returns to active state"
-            onClick={() => {
+                await activateRFE(currentRfeId, userName)
+                showToast('Resumed — list is active')
+              },
+            })
+          } else {
+            actions.push({
+              key: 'draft', label: 'Save as Draft', variant: 'draft',
+              icon: <FileEdit size={18} />,
+              onClick: async () => {
+                if (!userName) { setShowNameModal(true); return }
+                await draftRFE(currentRfeId, userName)
+                showToast('Saved as draft')
+              },
+            })
+          }
+        } else {
+          actions.push({
+            key: 'reopen', label: 'Re-open List', variant: 'resume',
+            icon: <Play size={18} />,
+            onClick: () => {
               if (!userName) { setShowNameModal(true); return }
               setConfirmReopen(true)
-            }}
+            },
+          })
+        }
+
+        return (
+          <div
+            ref={fabContainerRef}
+            className={`fab-dial${fabMenuOpen ? ' open' : ''}`}
           >
-            <Play size={20} />
-          </button>
-        )}
-        <button
-          className="fab fab-primary"
-          title="Export report"
-          aria-label="Export PDF report"
-          onClick={() => {
-            if (import.meta.env.DEV) console.log('[Export] Generating PDF report (online=' + navigator.onLine + ')')
-            try {
-              generatePDFReport(currentRfe, items, checkStates, userName)
-              showToast(navigator.onLine ? 'PDF report downloaded' : 'PDF report downloaded (offline)')
-            } catch (err) {
-              if (import.meta.env.DEV) console.error('[Export] PDF failed, falling back to HTML:', err)
-              const html = generateHTMLReportLegacy(currentRfe, items, checkStates, userName)
-              downloadReport(html, currentRfe)
-              showToast('Report downloaded (HTML fallback)')
-            }
-          }}
-        >
-          <Download size={22} />
-        </button>
-      </div>
+            {fabMenuOpen && (
+              <div className="fab-dial-menu" role="menu" aria-label="List actions">
+                {actions.map(a => (
+                  <button
+                    key={a.key}
+                    className="fab-dial-item"
+                    data-variant={a.variant}
+                    role="menuitem"
+                    onClick={() => { setFabMenuOpen(false); a.onClick() }}
+                  >
+                    <span className="fab-dial-label">{a.label}</span>
+                    <span className="fab-dial-icon" aria-hidden="true">{a.icon}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <button
+              className="fab fab-primary fab-dial-trigger"
+              aria-label={fabMenuOpen ? 'Close actions menu' : 'Open actions menu'}
+              aria-expanded={fabMenuOpen}
+              aria-haspopup="menu"
+              onClick={() => setFabMenuOpen(o => !o)}
+            >
+              {fabMenuOpen ? <X size={22} /> : <MoreVertical size={22} />}
+            </button>
+          </div>
+        )
+      })()}
 
       {/* Finalize confirmation */}
       {confirmFinalize && (
