@@ -1,7 +1,7 @@
-// TCG Field Check — Service Worker v3.1
+// CheckFlow — Service Worker v3.2
 // Offline-first: cache shell, network-only for Supabase API
 
-const CACHE_NAME = 'tcg-fieldcheck-v3-1'
+const CACHE_NAME = 'checkflow-v3-2'
 const APP_SHELL = [
   '/',
   '/index.html',

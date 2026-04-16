@@ -1,7 +1,7 @@
 {
-  "name": "TCG Field Check",
-  "short_name": "Field Check",
-  "description": "Thompson Construction Group — Field Equipment Verification",
+  "name": "CheckFlow",
+  "short_name": "CheckFlow",
+  "description": "CheckFlow — Field Equipment Verification",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

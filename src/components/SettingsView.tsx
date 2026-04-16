@@ -219,7 +219,7 @@ export default function SettingsView() {
           <div className="settings-row" style={{ cursor: 'default' }}>
             <span className="settings-row-icon"><Info size={18} /></span>
             <div className="settings-row-info">
-              <div className="settings-row-label">TCG Field Check</div>
+              <div className="settings-row-label">CheckFlow</div>
               <div className="settings-row-sub">v2.1 · Vite + React + Supabase</div>
             </div>
           </div>

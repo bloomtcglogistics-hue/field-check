@@ -463,7 +463,7 @@ export function generateHTMLReportLegacy(
     '<head>',
     '<meta charset="UTF-8">',
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
-    `<title>TCG Field Check \u2014 ${esc(rfe.name)}</title>`,
+    `<title>CheckFlow \u2014 ${esc(rfe.name)}</title>`,
     '<style>',
     '*{box-sizing:border-box;margin:0;padding:0}',
     "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;padding:24px;color:#111827;background:#f3f4f6}",
@@ -486,7 +486,7 @@ export function generateHTMLReportLegacy(
     '</head>',
     '<body>',
     '<div class="header">',
-    '  <h1>TCG Field Check Report</h1>',
+    '  <h1>Thompson Construction Group — Field Verification Report</h1>',
     `  <p><strong>${esc(rfe.name)}</strong></p>`,
     `  <p>File: ${esc(rfe.file_name)}</p>`,
     `  <div class="meta">Generated: ${date}${checkedBy ? ` &middot; By: ${esc(checkedBy)}` : ''}</div>`,
@@ -527,7 +527,7 @@ export function downloadReport(html: string, rfe: RFEIndex): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `TCG-FieldCheck-${rfe.name.replace(/[^a-z0-9]/gi, '-')}-${new Date().toISOString().slice(0, 10)}.html`
+  a.download = `TCG-Field-Report-${rfe.name.replace(/[^a-z0-9]/gi, '-')}-${new Date().toISOString().slice(0, 10)}.html`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)

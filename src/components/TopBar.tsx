@@ -38,7 +38,7 @@ export default function TopBar() {
   return (
     <div className="topbar">
       <div className="topbar-brand">
-        <div className="topbar-title">TCG Field Check</div>
+        <div className="topbar-title">CheckFlow</div>
         {subtitle && <div className="topbar-sub">{subtitle}</div>}
       </div>
 
