@@ -1,11 +1,11 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
-import { FileX, Download } from 'lucide-react'
+import { FileX, Download, Lock, FileEdit, Save, Play } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { generatePDFReport, generateHTMLReportLegacy, downloadReport } from '../lib/exportReport'
 import SearchScanBar, { type SearchScanBarHandle } from './SearchScanBar'
 import FilterBar from './FilterBar'
-import ItemCard from './ItemCard'
+import VirtualItemList from './VirtualItemList'
 import ConflictBanner from './ConflictBanner'
 import type { Item, DisplayConfig } from '../types'
 
@@ -95,7 +95,12 @@ function NameModal({ onSave }: { onSave: (name: string) => void }) {
 
 export default function ChecklistView() {
   const { currentRfeId, userName, setUserName, searchQuery, filter, setFilter, setActiveTab } = useAppStore()
-  const { rfeList, items, checkStates, loading, loadRFE, subscribeToRFE, selectAllFiltered, conflicts, pendingItemIds } = useRealtimeStore()
+  const {
+    rfeList, items, checkStates, loading, loadRFE, subscribeToRFE, selectAllFiltered,
+    conflicts, pendingItemIds, finalizeRFE, draftRFE, activateRFE,
+  } = useRealtimeStore()
+  const [confirmFinalize, setConfirmFinalize] = useState(false)
+  const [confirmReopen, setConfirmReopen] = useState(false)
   const conflictItemIds = useMemo(() => new Set(conflicts.map(c => c.itemId)), [conflicts])
   const [showNameModal, setShowNameModal] = useState(false)
   const [toastMsg, setToastMsg] = useState('')
@@ -114,6 +119,9 @@ export default function ChecklistView() {
   }, [filtersOpen])
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
+  const status = currentRfe?.status ?? 'active'
+  const isFinalized = status === 'finalized'
+  const isDraft = status === 'draft'
 
   useEffect(() => {
     if (currentRfeId) {
@@ -344,13 +352,40 @@ export default function ChecklistView() {
       {/* Offline conflict banner */}
       <ConflictBanner />
 
-      {/* Compact progress bar — single line, thin track */}
+      {/* Compact progress bar — single line, thin track. Status pill at left
+          when the list is in a non-default lifecycle state. */}
       <div className="progress-compact">
+        {isFinalized && (
+          <span
+            className="rfe-status-badge finalized"
+            role="status"
+            aria-label="This list is finalized and read-only"
+          >
+            <Lock size={10} aria-hidden="true" /> FINALIZED
+          </span>
+        )}
+        {isDraft && (
+          <span
+            className="rfe-status-badge draft"
+            role="status"
+            aria-label="Draft — saved for later"
+          >
+            <FileEdit size={10} aria-hidden="true" /> DRAFT
+          </span>
+        )}
         <div className="progress-track-sm">
           <div className="progress-fill" style={{ width: `${pct}%` }} />
         </div>
         <span className="progress-count">{checkedCount}/{total} · {pct}%</span>
       </div>
+
+      {/* Read-only banner when finalized — communicates locked state */}
+      {isFinalized && (
+        <div className="readonly-banner" role="status" aria-live="polite">
+          <Lock size={14} aria-hidden="true" />
+          <span>This list is finalized. Re-open to edit.</span>
+        </div>
+      )}
 
       {/* Unified search / scan + filter toggle — sticky above list */}
       <SearchScanBar
@@ -365,12 +400,13 @@ export default function ChecklistView() {
         totalCount={total}
       />
 
-      {/* Collapsible filter + sort + bulk-select section */}
+      {/* Collapsible filter + sort + bulk-select section. When finalized we
+          still allow filter/sort for browsing, but bulk-select is hidden. */}
       {filtersOpen && (
         <div className="filter-collapse">
           <FilterBar groups={groups} />
 
-          {filtered.length > 0 && (
+          {filtered.length > 0 && !isFinalized && (
             <div className="select-bar">
               <div className="select-bar-btns">
                 <button
@@ -423,41 +459,98 @@ export default function ChecklistView() {
         </div>
       )}
 
-      {/* Item list */}
-      <div className="view-container" style={{ overflowY: 'auto', paddingBottom: 100 }}>
-        {filtered.length === 0 ? (
-          <div className="empty-state">
-            <FileX size={40} />
-            <h3>No Items Found</h3>
-            <p>{searchQuery ? `No matches for "${searchQuery}"` : 'No items match the current filter.'}</p>
-          </div>
-        ) : (
-          grouped.map(({ group, items: groupItems }) => (
-            <div key={group ?? '_all'} className="item-list">
-              {group && <div className="group-header">{group}</div>}
-              {groupItems.map(item => (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  displayConfig={currentRfe.display_config}
-                  searchQuery={searchQuery}
-                  onNeedName={() => setShowNameModal(true)}
-                  hasPendingMutation={pendingItemIds.has(item.id)}
-                  hasConflict={conflictItemIds.has(item.id)}
-                  scanHighlight={scanHighlightId === item.id}
-                  scanRevision={scanRevision}
-                />
-              ))}
-            </div>
-          ))
-        )}
-      </div>
+      {/* Item list — virtualized for 500+ item performance. When finalized we
+          wrap in a class that suppresses pointer events so toggles/notes/qty
+          edits cannot fire. Visual dimming comes from the same class. */}
+      {filtered.length === 0 ? (
+        <div className="empty-state" style={{ flex: 1 }}>
+          <FileX size={40} />
+          <h3>No Items Found</h3>
+          <p>{searchQuery ? `No matches for "${searchQuery}"` : 'No items match the current filter.'}</p>
+        </div>
+      ) : (
+        <div
+          className={isFinalized ? 'checklist-readonly' : ''}
+          aria-disabled={isFinalized || undefined}
+          style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+        >
+          <VirtualItemList
+            grouped={grouped}
+            displayConfig={currentRfe.display_config}
+            searchQuery={searchQuery}
+            onNeedName={() => setShowNameModal(true)}
+            pendingItemIds={pendingItemIds}
+            conflictItemIds={conflictItemIds}
+            scanHighlightId={scanHighlightId}
+            scanRevision={scanRevision}
+          />
+        </div>
+      )}
 
-      {/* Export FAB */}
-      <div className="fabs">
+      {/* FAB stack — bottom-right column.
+          ACTIVE/DRAFT: Save (finalize), Save Draft, Export PDF
+          FINALIZED:    Re-open + Export PDF only */}
+      <div className="fabs fab-stack">
+        {!isFinalized && (
+          <>
+            <button
+              className="fab fab-save"
+              title="Finalize this list"
+              aria-label="Finalize and lock this list"
+              onClick={() => {
+                if (!userName) { setShowNameModal(true); return }
+                setConfirmFinalize(true)
+              }}
+            >
+              <Save size={20} />
+            </button>
+            {!isDraft && (
+              <button
+                className="fab fab-draft"
+                title="Save as draft"
+                aria-label="Save list as draft (paused)"
+                onClick={async () => {
+                  if (!userName) { setShowNameModal(true); return }
+                  await draftRFE(currentRfeId, userName)
+                  showToast('Saved as draft')
+                }}
+              >
+                <FileEdit size={20} />
+              </button>
+            )}
+            {isDraft && (
+              <button
+                className="fab fab-draft"
+                title="Resume — return to active"
+                aria-label="Resume editing — return list to active state"
+                onClick={async () => {
+                  if (!userName) { setShowNameModal(true); return }
+                  await activateRFE(currentRfeId, userName)
+                  showToast('Resumed — list is active')
+                }}
+              >
+                <Play size={20} />
+              </button>
+            )}
+          </>
+        )}
+        {isFinalized && (
+          <button
+            className="fab fab-save"
+            title="Re-open finalized list"
+            aria-label="Re-open finalized list — returns to active state"
+            onClick={() => {
+              if (!userName) { setShowNameModal(true); return }
+              setConfirmReopen(true)
+            }}
+          >
+            <Play size={20} />
+          </button>
+        )}
         <button
           className="fab fab-primary"
           title="Export report"
+          aria-label="Export PDF report"
           onClick={() => {
             if (import.meta.env.DEV) console.log('[Export] Generating PDF report (online=' + navigator.onLine + ')')
             try {
@@ -474,6 +567,86 @@ export default function ChecklistView() {
           <Download size={22} />
         </button>
       </div>
+
+      {/* Finalize confirmation */}
+      {confirmFinalize && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="finalize-title"
+          onClick={() => setConfirmFinalize(false)}
+        >
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-icon warning">
+              <Lock size={24} aria-hidden="true" />
+            </div>
+            <h3 id="finalize-title" className="modal-title">Finalize this list?</h3>
+            <p className="modal-body">
+              Finalizing locks the list as read-only. You can always re-open it
+              later, but other devices will see it as completed.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="readonly-action secondary"
+                onClick={() => setConfirmFinalize(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="readonly-action primary"
+                onClick={async () => {
+                  await finalizeRFE(currentRfeId, userName)
+                  setConfirmFinalize(false)
+                  showToast('List finalized')
+                }}
+              >
+                <Lock size={16} /> Finalize
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Re-open confirmation (from finalized state) */}
+      {confirmReopen && (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reopen-title"
+          onClick={() => setConfirmReopen(false)}
+        >
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-icon warning">
+              <Play size={24} aria-hidden="true" />
+            </div>
+            <h3 id="reopen-title" className="modal-title">Re-open finalized list?</h3>
+            <p className="modal-body">
+              This will return the list to active status so you can edit again.
+              Other devices viewing it will be notified.
+            </p>
+            <div className="modal-actions">
+              <button
+                className="readonly-action secondary"
+                onClick={() => setConfirmReopen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="readonly-action primary resume"
+                onClick={async () => {
+                  await activateRFE(currentRfeId, userName)
+                  setConfirmReopen(false)
+                  showToast('List re-opened — now active')
+                }}
+              >
+                <Play size={16} /> Re-open
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showNameModal && (
         <NameModal

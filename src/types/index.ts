@@ -1,3 +1,9 @@
+/** Lifecycle state for a checklist (RFE).
+ *  - active: in-progress, fully editable (default for new imports)
+ *  - draft:  paused/saved-for-later, fully editable, visually distinct
+ *  - finalized: locked/read-only; can be re-opened with confirmation */
+export type RFEStatus = 'active' | 'draft' | 'finalized'
+
 export interface RFEIndex {
   id: string
   name: string
@@ -13,6 +19,10 @@ export interface RFEIndex {
   report_type?: string | null
   /** User-entered external reference for the list (e.g. "RFE-2024-001", "Job #12345"). */
   reference_id?: string | null
+  /** Lifecycle state — defaults to 'active' if column not yet migrated. */
+  status?: RFEStatus
+  status_updated_at?: string | null
+  status_updated_by?: string | null
 }
 
 export interface DisplayConfig {

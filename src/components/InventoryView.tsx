@@ -3,6 +3,7 @@ import { Package, Upload, Search, X } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import RFECard from './RFECard'
+import ReadOnlyDetailView from './ReadOnlyDetailView'
 import type { RFEIndex } from '../types'
 
 function matchesQuery(rfe: RFEIndex, q: string): boolean {
@@ -28,8 +29,8 @@ function matchesQuery(rfe: RFEIndex, q: string): boolean {
 }
 
 export default function InventoryView() {
-  const { setActiveTab, setCurrentRfeId } = useAppStore()
-  const { rfeList, loading, deleteRFE, resetChecks } = useRealtimeStore()
+  const { setActiveTab, setInventoryDetailRfeId, inventoryDetailRfeId } = useAppStore()
+  const { rfeList, loading } = useRealtimeStore()
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
 
@@ -39,15 +40,30 @@ export default function InventoryView() {
     return () => clearTimeout(t)
   }, [searchQuery])
 
+  /** Click on a card opens the read-only detail view (renders inside this tab). */
   const handleOpen = (rfeId: string) => {
-    setCurrentRfeId(rfeId)
-    setActiveTab('checklist')
+    setInventoryDetailRfeId(rfeId)
   }
 
   const filtered = useMemo(
     () => rfeList.filter(rfe => matchesQuery(rfe, debouncedQuery)),
     [rfeList, debouncedQuery],
   )
+
+  // If a card was tapped, show the read-only detail instead of the list.
+  if (inventoryDetailRfeId) {
+    const target = rfeList.find(r => r.id === inventoryDetailRfeId)
+    if (target) {
+      return (
+        <ReadOnlyDetailView
+          rfe={target}
+          onBack={() => setInventoryDetailRfeId(null)}
+        />
+      )
+    }
+    // RFE not found (deleted on another device) — bounce back to list
+    setInventoryDetailRfeId(null)
+  }
 
   if (loading) {
     return (
@@ -129,8 +145,6 @@ export default function InventoryView() {
                 key={rfe.id}
                 rfe={rfe}
                 onOpen={() => handleOpen(rfe.id)}
-                onDelete={() => deleteRFE(rfe.id)}
-                onReset={() => resetChecks(rfe.id)}
               />
             ))}
           </div>
@@ -156,12 +170,10 @@ export default function InventoryView() {
 // filtered list) so we don't do a linear find-by-id per card on every store
 // update. Only the live checkedCount / conflictCount need store selectors.
 function InventoryRFECardWrapper({
-  rfe, onOpen, onDelete, onReset,
+  rfe, onOpen,
 }: {
   rfe: RFEIndex
   onOpen: () => void
-  onDelete: () => void
-  onReset: () => void
 }) {
   const { currentRfeId } = useAppStore()
   const rfeId = rfe.id
@@ -190,8 +202,6 @@ function InventoryRFECardWrapper({
       rfe={rfe}
       checkedCount={checkedCount}
       onSelect={onOpen}
-      onDelete={onDelete}
-      onReset={onReset}
       hasConflicts={conflictCount > 0}
       conflictCount={conflictCount}
     />

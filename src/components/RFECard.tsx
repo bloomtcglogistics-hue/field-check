@@ -1,18 +1,33 @@
-import { Trash2, RefreshCw, ChevronRight, AlertTriangle } from 'lucide-react'
-import type { RFEIndex } from '../types'
+import { ChevronRight, AlertTriangle, Lock, FileEdit } from 'lucide-react'
+import type { RFEIndex, RFEStatus } from '../types'
 
 interface Props {
   rfe: RFEIndex
   checkedCount: number
   onSelect: () => void
-  onDelete: () => void
-  onReset: () => void
   hasConflicts?: boolean
   conflictCount?: number
 }
 
+function statusMeta(status: RFEStatus | undefined): {
+  label: string
+  className: string
+  icon?: React.ReactNode
+} | null {
+  switch (status) {
+    case 'finalized':
+      return { label: 'FINALIZED', className: 'finalized', icon: <Lock size={10} aria-hidden="true" /> }
+    case 'draft':
+      return { label: 'DRAFT', className: 'draft', icon: <FileEdit size={10} aria-hidden="true" /> }
+    case 'active':
+      return null // active is the default — no badge needed
+    default:
+      return null
+  }
+}
+
 export default function RFECard({
-  rfe, checkedCount, onSelect, onDelete, onReset,
+  rfe, checkedCount, onSelect,
   hasConflicts = false, conflictCount = 0,
 }: Props) {
   const total = rfe.count
@@ -23,23 +38,27 @@ export default function RFECard({
   if (pct === 100) { badge = 'complete'; badgeLabel = 'COMPLETE' }
   else if (checkedCount > 0) { badge = 'partial'; badgeLabel = 'PARTIAL' }
 
+  const statusBadge = statusMeta(rfe.status)
+  const cardStatusClass = rfe.status === 'finalized'
+    ? ' status-finalized'
+    : rfe.status === 'draft'
+      ? ' status-draft'
+      : ''
+
   const date = new Date(rfe.imported_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   })
 
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (window.confirm(`Delete "${rfe.name}"? This cannot be undone.`)) onDelete()
-  }
-
-  const handleReset = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (window.confirm(`Reset all checks for "${rfe.name}"?`)) onReset()
-  }
-
   return (
-    <div className={`rfe-card${hasConflicts ? ' conflict' : ''}`}>
-      <div className="rfe-card-body" onClick={onSelect}>
+    <div
+      className={`rfe-card${hasConflicts ? ' conflict' : ''}${cardStatusClass}`}
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect() } }}
+      aria-label={`Open ${rfe.name}${rfe.status ? ` — ${rfe.status}` : ''}`}
+    >
+      <div className="rfe-card-body">
         <div className="rfe-card-top">
           <div className="rfe-name">{rfe.name}</div>
           <div className="rfe-badge-group">
@@ -52,6 +71,16 @@ export default function RFECard({
               >
                 <AlertTriangle size={11} aria-hidden="true" />
                 {conflictCount} {conflictCount === 1 ? 'CONFLICT' : 'CONFLICTS'}
+              </span>
+            )}
+            {statusBadge && (
+              <span
+                className={`rfe-status-badge ${statusBadge.className}`}
+                role="status"
+                aria-label={`Lifecycle status: ${statusBadge.label.toLowerCase()}`}
+              >
+                {statusBadge.icon}
+                {statusBadge.label}
               </span>
             )}
             <span
@@ -87,21 +116,10 @@ export default function RFECard({
             <div className="progress-fill" style={{ width: `${pct}%` }} />
           </div>
         </div>
-      </div>
-
-      <div className="rfe-card-actions">
-        <button
-          className="rfe-action-btn primary"
-          onClick={onSelect}
-        >
-          Open <ChevronRight size={14} />
-        </button>
-        <button className="rfe-action-btn reset" onClick={handleReset}>
-          <RefreshCw size={14} /> Reset
-        </button>
-        <button className="rfe-action-btn danger" onClick={handleDelete}>
-          <Trash2 size={14} /> Delete
-        </button>
+        <div className="rfe-card-hint">
+          <span>Tap to view details</span>
+          <ChevronRight size={14} aria-hidden="true" />
+        </div>
       </div>
     </div>
   )

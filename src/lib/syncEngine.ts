@@ -85,6 +85,16 @@ async function replayEntry(entry: QueueEntry): Promise<'success' | 'network' | '
         result = res
         break
       }
+      case 'setRFEStatus': {
+        // Lifecycle status mutation — applied to fc_rfe_index, not fc_check_state.
+        const { rfe_id, ...update } = entry.payload as Record<string, unknown>
+        const res = await supabase
+          .from('fc_rfe_index')
+          .update(update)
+          .eq('id', rfe_id as string)
+        result = res
+        break
+      }
       default:
         // Unknown type — discard
         await dequeue(entry.id)

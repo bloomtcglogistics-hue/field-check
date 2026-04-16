@@ -7,7 +7,7 @@ import { get, set } from 'idb-keyval'
 
 export interface QueueEntry {
   id: string
-  type: 'toggleCheck' | 'updateNote' | 'updateQtyFound' | 'resetChecks' | 'selectAll'
+  type: 'toggleCheck' | 'updateNote' | 'updateQtyFound' | 'resetChecks' | 'selectAll' | 'setRFEStatus'
   payload: Record<string, unknown>
   timestamp: string
   userName: string

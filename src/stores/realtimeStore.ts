@@ -10,7 +10,7 @@ import { enqueue, getQueue, getQueueCount, subscribeToQueueChanges } from '../li
 import { registerStoreRef, replayQueue, isNetworkError, isNetworkStatus } from '../lib/syncEngine'
 import type { ConflictItem } from '../lib/conflictDetector'
 import { parseConflictNote, formatItemDescription, stripConflictPrefix } from '../lib/conflictDetector'
-import type { RFEIndex, Item, CheckState, DisplayConfig } from '../types'
+import type { RFEIndex, Item, CheckState, DisplayConfig, RFEStatus } from '../types'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 interface RealtimeState {
@@ -50,6 +50,12 @@ interface RealtimeState {
   deleteRFE: (rfeId: string) => Promise<void>
   resetChecks: (rfeId: string) => Promise<void>
   selectAllFiltered: (itemIds: string[], rfeId: string, checked: boolean, userName: string) => Promise<void>
+
+  // Lifecycle status
+  setRFEStatus: (rfeId: string, status: RFEStatus, userName: string) => Promise<void>
+  finalizeRFE: (rfeId: string, userName: string) => Promise<void>
+  draftRFE: (rfeId: string, userName: string) => Promise<void>
+  activateRFE: (rfeId: string, userName: string) => Promise<void>
 
   // Realtime subscriptions
   subscribeToRFEList: () => void
@@ -759,6 +765,59 @@ export const useRealtimeStore = create<RealtimeState>((set, get) => {
           console.error('[selectAllFiltered] Unexpected error:', err)
         }
       }
+    },
+
+    // ── Lifecycle status mutations (active / draft / finalized) ──────────────
+    setRFEStatus: async (rfeId, status, userName) => {
+      const now = new Date().toISOString()
+
+      // Optimistic update — patch the rfeList entry in place so badges flip
+      // immediately without yanking anyone out of an in-progress session.
+      const nextList = get().rfeList.map(r =>
+        r.id === rfeId
+          ? { ...r, status, status_updated_at: now, status_updated_by: userName }
+          : r,
+      )
+      set({ rfeList: nextList })
+      await saveRFEList(nextList)
+
+      const payload = { status, status_updated_at: now, status_updated_by: userName }
+
+      if (!navigator.onLine) {
+        await enqueue({ type: 'setRFEStatus', payload: { rfe_id: rfeId, ...payload }, timestamp: now, userName, rfeId })
+        return
+      }
+
+      try {
+        const { error, status: httpStatus } = await supabase
+          .from('fc_rfe_index')
+          .update(payload)
+          .eq('id', rfeId)
+
+        if (error) {
+          if (isNetworkStatus(httpStatus)) {
+            await enqueue({ type: 'setRFEStatus', payload: { rfe_id: rfeId, ...payload }, timestamp: now, userName, rfeId })
+            return
+          }
+          console.error('[setRFEStatus]', error.message)
+          set({ error: error.message })
+        }
+      } catch (err) {
+        if (isNetworkError(err)) {
+          await enqueue({ type: 'setRFEStatus', payload: { rfe_id: rfeId, ...payload }, timestamp: now, userName, rfeId })
+          return
+        }
+        console.error('[setRFEStatus] Unexpected error:', err)
+      }
+    },
+    finalizeRFE: async (rfeId, userName) => {
+      await get().setRFEStatus(rfeId, 'finalized', userName)
+    },
+    draftRFE: async (rfeId, userName) => {
+      await get().setRFEStatus(rfeId, 'draft', userName)
+    },
+    activateRFE: async (rfeId, userName) => {
+      await get().setRFEStatus(rfeId, 'active', userName)
     },
 
     // ── Subscribe to real-time updates for the RFE list ──────────────────────

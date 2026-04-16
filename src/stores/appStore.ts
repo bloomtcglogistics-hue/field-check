@@ -11,6 +11,11 @@ interface AppState {
   currentRfeId: string | null
   setCurrentRfeId: (id: string | null) => void
 
+  /** When set on the inventory tab, render ReadOnlyDetailView for this RFE
+   *  instead of the card grid. Cleared on Back / Edit transitions. */
+  inventoryDetailRfeId: string | null
+  setInventoryDetailRfeId: (id: string | null) => void
+
   // User identity (persisted to localStorage)
   userName: string
   setUserName: (name: string) => void
@@ -50,6 +55,9 @@ export const useAppStore = create<AppState>()(
 
       currentRfeId: null,
       setCurrentRfeId: (id) => set({ currentRfeId: id }),
+
+      inventoryDetailRfeId: null,
+      setInventoryDetailRfeId: (id) => set({ inventoryDetailRfeId: id }),
 
       userName: '',
       setUserName: (name) => set({ userName: name.trim() }),

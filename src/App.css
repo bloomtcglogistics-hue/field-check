@@ -1576,3 +1576,304 @@ mark {
     transform: translateX(-50%) translateY(0) !important;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Lifecycle status (active / draft / finalized) — added in checklist
+   lifecycle pass. Status badges, FAB stack, read-only mode, modal cards,
+   manage-inventory grid, ReadOnlyDetailView.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── Status badges (RFE lifecycle) ── */
+.rfe-status-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-weight: 800; letter-spacing: 0.4px;
+  padding: 3px 7px; border-radius: 999px; line-height: 1;
+  text-transform: uppercase; white-space: nowrap;
+  border: 1px solid transparent;
+}
+.rfe-status-badge.finalized {
+  background: #e0e7ff; color: #3730a3; border-color: #c7d2fe;
+}
+.rfe-status-badge.draft {
+  background: #fef3c7; color: #92400e; border-color: #fde68a;
+}
+[data-theme="dark"] .rfe-status-badge.finalized {
+  background: rgba(99, 102, 241, 0.18); color: #c7d2fe; border-color: rgba(99, 102, 241, 0.4);
+}
+[data-theme="dark"] .rfe-status-badge.draft {
+  background: rgba(245, 158, 11, 0.18); color: #fcd34d; border-color: rgba(245, 158, 11, 0.4);
+}
+
+/* ── RFE card — lifecycle borders + click hint ── */
+.rfe-card { cursor: pointer; transition: transform 0.12s, box-shadow 0.12s; }
+.rfe-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
+.rfe-card:focus-visible {
+  outline: 2px solid var(--green); outline-offset: 2px;
+}
+.rfe-card.status-finalized {
+  border-left: 4px solid #6366f1;
+}
+.rfe-card.status-draft {
+  border-left: 4px solid #f59e0b;
+}
+.rfe-card-hint {
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px; color: var(--text3); font-weight: 600;
+}
+
+/* ── FAB stack (3 vertical) ── */
+.fabs.fab-stack { gap: 12px; }
+.fab-save {
+  background: var(--green); color: #fff;
+}
+.fab-draft {
+  background: #f59e0b; color: #fff;
+}
+
+/* ── Read-only banner inside ChecklistView ── */
+.readonly-banner {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 8px 14px;
+  background: #e0e7ff; color: #3730a3;
+  border-bottom: 1px solid #c7d2fe;
+  font-size: 12px; font-weight: 700;
+}
+[data-theme="dark"] .readonly-banner {
+  background: rgba(99, 102, 241, 0.15);
+  color: #c7d2fe;
+  border-bottom-color: rgba(99, 102, 241, 0.3);
+}
+
+/* ── Visually disable + interactively suppress the item list when finalized ── */
+.checklist-readonly {
+  pointer-events: none;
+  opacity: 0.78;
+  filter: saturate(0.85);
+}
+
+/* ── Modal card (used by finalize / re-open / resume confirmations) ── */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  animation: modalFade 0.15s ease-out;
+}
+@keyframes modalFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.modal-card {
+  width: 100%; max-width: 380px;
+  background: var(--card-bg); color: var(--text);
+  border-radius: 14px; padding: 20px;
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  text-align: center;
+}
+.modal-icon {
+  width: 48px; height: 48px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-icon.warning {
+  background: #fef3c7; color: #b45309;
+}
+[data-theme="dark"] .modal-icon.warning {
+  background: rgba(245, 158, 11, 0.2); color: #fcd34d;
+}
+.modal-title { font-size: 16px; font-weight: 800; margin: 0; }
+.modal-body {
+  font-size: 13px; color: var(--text2); line-height: 1.5; margin: 0;
+}
+.modal-actions {
+  display: flex; gap: 8px; width: 100%; margin-top: 6px;
+}
+.modal-actions > * { flex: 1; }
+
+/* ── ReadOnlyDetailView ── */
+.readonly-detail {
+  display: flex; flex-direction: column;
+  height: 100%; min-height: 0; flex: 1;
+  background: var(--bg);
+}
+.readonly-header {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 14px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+}
+.readonly-back-btn {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--text2); border: 1px solid var(--border);
+  cursor: pointer; transition: background 0.12s;
+}
+.readonly-back-btn:hover { background: var(--border); }
+.readonly-header-text { flex: 1; min-width: 0; }
+.readonly-title-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.readonly-title {
+  font-size: 16px; font-weight: 800; margin: 0; color: var(--text);
+}
+.readonly-subtitle {
+  font-size: 12px; color: var(--text3); margin-top: 4px;
+}
+.readonly-progress {
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  background: var(--card-bg);
+}
+.readonly-progress-row {
+  display: flex; justify-content: space-between;
+  font-size: 12px; color: var(--text2); margin-bottom: 4px;
+}
+.readonly-list {
+  flex: 1; overflow-y: auto;
+  padding: 6px 14px 100px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.readonly-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.readonly-item.checked {
+  background: #f0fdf4; border-color: #bbf7d0;
+}
+.readonly-item.partial {
+  background: #fff7ed; border-color: #fed7aa;
+}
+[data-theme="dark"] .readonly-item.checked {
+  background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.3);
+}
+[data-theme="dark"] .readonly-item.partial {
+  background: rgba(249, 115, 22, 0.12); border-color: rgba(249, 115, 22, 0.3);
+}
+.readonly-item-icon {
+  flex-shrink: 0; color: var(--text3); margin-top: 2px;
+}
+.readonly-item.checked .readonly-item-icon { color: var(--green); }
+.readonly-item.partial .readonly-item-icon { color: #f97316; }
+.readonly-item-text { flex: 1; min-width: 0; }
+.readonly-item-primary {
+  font-weight: 700; color: var(--text); line-height: 1.3;
+  word-wrap: break-word;
+}
+.readonly-item-secondary {
+  font-size: 12px; color: var(--text2); margin-top: 2px;
+}
+.readonly-item-note {
+  font-size: 11px; color: var(--text3); margin-top: 4px;
+  font-style: italic;
+}
+.readonly-item-qty {
+  flex-shrink: 0;
+  min-width: 32px; padding: 2px 8px;
+  background: var(--green); color: #fff;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 800; text-align: center;
+  align-self: center;
+}
+.readonly-actions {
+  position: sticky; bottom: 0;
+  display: flex; gap: 8px; padding: 12px 14px;
+  background: var(--card-bg);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
+}
+.readonly-action {
+  flex: 1; min-height: 44px; padding: 10px 14px;
+  border-radius: 8px; font-size: 13px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  cursor: pointer; transition: opacity 0.12s, transform 0.1s;
+  border: 1px solid transparent;
+}
+.readonly-action:active { transform: scale(0.97); }
+.readonly-action:disabled { opacity: 0.5; cursor: not-allowed; }
+.readonly-action.primary {
+  background: var(--green); color: #fff;
+}
+.readonly-action.primary.resume {
+  background: #6366f1;
+}
+.readonly-action.secondary {
+  background: var(--card-bg); color: var(--text2);
+  border-color: var(--border);
+}
+.readonly-action.ghost {
+  background: transparent; color: var(--text2);
+  border-color: var(--border);
+}
+
+/* ── Settings: Manage Inventory ── */
+.settings-mini-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: 6px;
+  background: var(--green); color: #fff;
+  font-size: 12px; font-weight: 700;
+  border: none; cursor: pointer;
+  white-space: nowrap;
+}
+.settings-mini-btn.ghost {
+  background: var(--card-bg); color: var(--text2);
+  border: 1px solid var(--border);
+}
+.settings-mini-btn:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+.manage-inventory-list {
+  border-top: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  max-height: 50vh; overflow-y: auto;
+}
+.manage-inventory-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer; transition: background 0.1s;
+}
+.manage-inventory-row:hover:not(.locked) {
+  background: var(--bg);
+}
+.manage-inventory-row.locked {
+  opacity: 0.55; cursor: not-allowed;
+}
+.manage-inventory-row input[type="checkbox"] {
+  width: 18px; height: 18px; flex-shrink: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+.manage-inventory-row.locked input[type="checkbox"] { cursor: not-allowed; }
+.manage-inventory-text { flex: 1; min-width: 0; }
+.manage-inventory-name {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 700; color: var(--text);
+  word-wrap: break-word;
+}
+.manage-inventory-sub {
+  font-size: 11px; color: var(--text3); margin-top: 2px;
+}
+.settings-delete-btn {
+  width: 100%; padding: 11px;
+  border-radius: 8px;
+  background: #ef4444; color: #fff;
+  font-size: 14px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  border: none; cursor: pointer;
+}
+.settings-delete-btn:disabled {
+  opacity: 0.6; cursor: not-allowed;
+}
+
+/* ── Mobile breakpoint tweaks for status UI ── */
+@media (max-width: 399px) {
+  .rfe-status-badge { font-size: 9px; padding: 2px 6px; }
+  .modal-card { padding: 16px; }
+  .readonly-actions { padding: 10px 12px; }
+  .readonly-action { font-size: 12px; padding: 9px 10px; min-height: 42px; }
+}
