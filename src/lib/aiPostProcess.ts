@@ -223,8 +223,14 @@ export function applyAIPostProcessing(
   notices: string[]
 } {
   // Step 1 — header-wins remap (e.g. "Cat Class Description" mis-mapped to
-  // `type` gets flipped back to `description` before dedupe sees it).
+  // `type` gets flipped back to `description` before dedupe sees it). This is
+  // a silent auto-correction: the user can still override via the role
+  // dropdown if it's wrong, but raising a banner makes a successful fix look
+  // like a problem. DEV log only.
   const { mappings: forced, remapped } = forceDescriptionByHeader(ai.mappings)
+  if (import.meta.env.DEV && remapped.length > 0) {
+    console.log('[aiPostProcess] Header-forced to Description:', remapped)
+  }
 
   // Step 2 — resolve duplicate field claims by confidence.
   const { mappings: cleanedMappings, conflicts } = dedupeMappingsByConfidence(forced)
@@ -233,9 +239,6 @@ export function applyAIPostProcessing(
   const compositePartKeys = splitCompositeFields(rows, cleanedMappings)
 
   const notices: string[] = []
-  for (const h of remapped) {
-    notices.push(`'${h}' re-classified as Description (header clearly indicates a description column).`)
-  }
   for (const c of conflicts) notices.push(conflictMessage(c))
   if (hintsApplied > 0) {
     const hintCols = (ai.extraction_hints ?? []).map(h => `'${h.source_column}'`).join(', ')
