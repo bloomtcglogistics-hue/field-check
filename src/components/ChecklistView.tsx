@@ -3,12 +3,13 @@ import { FileX, Download } from 'lucide-react'
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { generatePDFReport, generateHTMLReportLegacy, downloadReport } from '../lib/exportReport'
-import SearchBar from './SearchBar'
-import ScanBar, { type ScanBarHandle } from './ScanBar'
+import SearchScanBar, { type SearchScanBarHandle } from './SearchScanBar'
 import FilterBar from './FilterBar'
 import ItemCard from './ItemCard'
 import ConflictBanner from './ConflictBanner'
 import type { Item, DisplayConfig } from '../types'
+
+const FILTERS_OPEN_KEY = 'fc_filters_open_v1'
 
 /** Parse values like `1/2"`, `3/4`, `1 1/2"`, `2`, `12.5` into a comparable
  *  number. Returns NaN if no numeric content is found. Used to sort Size
@@ -103,7 +104,14 @@ export default function ChecklistView() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [scanHighlightId, setScanHighlightId] = useState<string | null>(null)
   const [scanRevision, setScanRevision] = useState(0)
-  const scanBarRef = useRef<ScanBarHandle>(null)
+  const scanBarRef = useRef<SearchScanBarHandle>(null)
+
+  const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem(FILTERS_OPEN_KEY) === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(FILTERS_OPEN_KEY, filtersOpen ? '1' : '0') } catch { /* ignore */ }
+  }, [filtersOpen])
 
   const currentRfe = rfeList.find(r => r.id === currentRfeId)
 
@@ -275,7 +283,6 @@ export default function ChecklistView() {
   const pct = total > 0 ? Math.round((checkedCount / total) * 100) : 0
   const filteredIds = filtered.map(it => it.id)
   const filteredChecked = filteredIds.filter(id => checkStates.get(id)?.checked).length
-  const allFilteredChecked = filteredIds.length > 0 && filteredChecked === filteredIds.length
 
   const handleSortCol = (col: string) => {
     if (sortCol === col) {
@@ -337,81 +344,81 @@ export default function ChecklistView() {
       {/* Offline conflict banner */}
       <ConflictBanner />
 
-      {/* Progress bar */}
-      <div className="progress-section">
-        <div className="progress-row">
-          <span className="progress-label">{checkedCount} / {total} items checked</span>
-          <span className="progress-pct">{pct}%</span>
-        </div>
-        <div className="progress-track">
+      {/* Compact progress bar — single line, thin track */}
+      <div className="progress-compact">
+        <div className="progress-track-sm">
           <div className="progress-fill" style={{ width: `${pct}%` }} />
         </div>
+        <span className="progress-count">{checkedCount}/{total} · {pct}%</span>
       </div>
 
-      {/* Scan / paste barcode */}
-      <ScanBar
+      {/* Unified search / scan + filter toggle — sticky above list */}
+      <SearchScanBar
         ref={scanBarRef}
         items={items}
         displayConfig={currentRfe.display_config}
-        onMatch={handleScanMatch}
-        onNoMatch={code => showToast(`Item not found: "${code}"`)}
+        onScanMatch={handleScanMatch}
+        onScanNoMatch={code => showToast(`Item not found: "${code}"`)}
+        filtersOpen={filtersOpen}
+        onToggleFilters={() => setFiltersOpen(o => !o)}
+        resultCount={filtered.length}
+        totalCount={total}
       />
 
-      {/* Search */}
-      <SearchBar resultCount={filtered.length} totalCount={total} />
+      {/* Collapsible filter + sort + bulk-select section */}
+      {filtersOpen && (
+        <div className="filter-collapse">
+          <FilterBar groups={groups} />
 
-      {/* Filters */}
-      <FilterBar groups={groups} />
+          {filtered.length > 0 && (
+            <div className="select-bar">
+              <div className="select-bar-btns">
+                <button
+                  className="select-btn"
+                  onClick={() => {
+                    if (!userName) { setShowNameModal(true); return }
+                    selectAllFiltered(filteredIds, currentRfeId, true, userName)
+                    showToast(`Marked ${filteredIds.length} as found`)
+                  }}
+                >
+                  Select All
+                </button>
+                <button
+                  className="select-btn deselect"
+                  onClick={() => {
+                    if (!userName) { setShowNameModal(true); return }
+                    selectAllFiltered(filteredIds, currentRfeId, false, userName)
+                    showToast('Deselected all')
+                  }}
+                >
+                  Deselect All
+                </button>
+              </div>
+              <span className="select-bar-info">
+                {filteredChecked}/{filteredIds.length}
+              </span>
+            </div>
+          )}
 
-      {/* Select All / Deselect All + sort headers */}
-      {filtered.length > 0 && (
-        <div className="select-bar">
-          <div className="select-bar-btns">
-            <button
-              className="select-btn"
-              onClick={() => {
-                if (!userName) { setShowNameModal(true); return }
-                selectAllFiltered(filteredIds, currentRfeId, true, userName)
-                showToast(`Marked ${filteredIds.length} as found`)
-              }}
-            >
-              Select All
-            </button>
-            <button
-              className="select-btn deselect"
-              onClick={() => {
-                if (!userName) { setShowNameModal(true); return }
-                selectAllFiltered(filteredIds, currentRfeId, false, userName)
-                showToast('Deselected all')
-              }}
-            >
-              Deselect All
-            </button>
-          </div>
-          <span className="select-bar-info">
-            {filteredChecked}/{filteredIds.length}
-          </span>
-        </div>
-      )}
-
-      {/* Column sort headers */}
-      {sortHeaders.length > 0 && (
-        <div className="sort-header-bar">
-          <span className="sort-header-label">Sort by:</span>
-          {sortHeaders.map(col => (
-            <button
-              key={col}
-              className={`sort-header-btn${sortCol === col ? ' active' : ''}`}
-              onClick={() => handleSortCol(col)}
-            >
-              {col}
-              {sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
-            </button>
-          ))}
-          {sortCol && (
-            <button className="sort-header-clear" onClick={() => { setSortCol(null); setSortDir('asc') }}>
-              ✕
-            </button>
+          {sortHeaders.length > 0 && (
+            <div className="sort-header-bar">
+              <span className="sort-header-label">Sort by:</span>
+              {sortHeaders.map(col => (
+                <button
+                  key={col}
+                  className={`sort-header-btn${sortCol === col ? ' active' : ''}`}
+                  onClick={() => handleSortCol(col)}
+                >
+                  {col}
+                  {sortCol === col ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                </button>
+              ))}
+              {sortCol && (
+                <button className="sort-header-clear" onClick={() => { setSortCol(null); setSortDir('asc') }}>
+                  ✕
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

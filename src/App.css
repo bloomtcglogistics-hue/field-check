@@ -270,7 +270,7 @@ input, textarea {
   flex-direction: column;
 }
 
-/* ── Progress bar ── */
+/* ── Progress bar (legacy — kept for other views) ── */
 .progress-section {
   background: var(--card-bg);
   padding: 12px 16px;
@@ -283,6 +283,38 @@ input, textarea {
 .progress-track { height: 6px; background: #E5E7EB; border-radius: 999px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--green); border-radius: 999px; transition: width 0.4s ease; }
 [data-theme="dark"] .progress-track { background: #334155; }
+
+/* ── Compact progress bar (checklist header) ── */
+.progress-compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 16px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.progress-track-sm {
+  flex: 1;
+  height: 4px;
+  background: #E5E7EB;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-track-sm .progress-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+[data-theme="dark"] .progress-track-sm { background: #334155; }
+.progress-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--green);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
 /* ── Search bar ── */
 .search-section {
@@ -436,7 +468,7 @@ input, textarea {
 }
 
 /* ── Item list ── */
-.item-list { padding: 8px 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+.item-list { padding: 6px 14px 16px; display: flex; flex-direction: column; gap: 6px; }
 
 /* ── Item card ── */
 .item-card {
@@ -501,11 +533,11 @@ input, textarea {
 .item-card-main {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  min-height: 64px;
+  gap: 10px;
+  padding: 8px 12px;
+  min-height: 52px;
 }
-.item-card.checked .item-card-main { padding-left: 11px; }
+.item-card.checked .item-card-main { padding-left: 9px; }
 
 /* Custom 28px checkbox */
 .item-checkbox {
@@ -1206,7 +1238,110 @@ mark {
 /* RFE badge conflict icon dark */
 [data-theme="dark"] .item-conflict-badge { background: #FB923C; color: #1c1917; }
 
-/* ── Scan bar ── */
+/* ── Unified search / scan bar ── */
+.search-scan-section {
+  position: relative;
+  background: var(--card-bg);
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border-light);
+  flex-shrink: 0;
+}
+.search-scan-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search-scan-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--green-50, #F0FDF4);
+  border: 1.5px solid var(--green);
+  border-radius: 9999px;
+  padding: 7px 14px;
+  min-height: 40px;
+  transition: box-shadow 0.15s;
+}
+.search-scan-wrap:focus-within {
+  box-shadow: 0 0 0 3px var(--green-light);
+}
+.search-scan-input {
+  flex: 1;
+  border: none;
+  background: none;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+}
+.search-scan-input::placeholder { color: var(--text3); }
+.search-scan-clear {
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  margin: -4px -4px -4px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.search-scan-count {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 3px;
+  padding: 0 4px;
+}
+
+/* Filter toggle button */
+.filter-toggle-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.filter-toggle-btn.active {
+  background: var(--green-light);
+  border-color: var(--green);
+  color: var(--green-dark);
+}
+.filter-toggle-btn:active { opacity: 0.7; }
+[data-theme="dark"] .filter-toggle-btn {
+  background: var(--card-bg);
+  border-color: var(--border);
+  color: var(--text2);
+}
+[data-theme="dark"] .filter-toggle-btn.active {
+  background: #064e3b;
+  border-color: var(--green);
+  color: #86efac;
+}
+[data-theme="dark"] .search-scan-wrap {
+  background: var(--card-bg);
+  border-color: var(--green);
+}
+[data-theme="dark"] .search-scan-input { color: var(--text); }
+[data-theme="dark"] .search-scan-input::placeholder { color: var(--text3); }
+[data-theme="dark"] .search-scan-wrap:focus-within {
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.25);
+}
+
+/* Collapsible filter/sort wrapper */
+.filter-collapse {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+/* ── Legacy scan bar (kept for external use) ── */
 .scan-section {
   position: relative;
   background: var(--card-bg);
@@ -1386,6 +1521,24 @@ mark {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* ── Responsive breakpoints — compact density for narrow phones ── */
+@media (max-width: 399px) {
+  .search-scan-section { padding: 5px 10px; }
+  .progress-compact { padding: 4px 10px; gap: 8px; }
+  .item-list { padding: 4px 8px 16px; gap: 5px; }
+  .item-card-main { padding: 7px 10px; min-height: 48px; gap: 8px; }
+  .item-card.checked .item-card-main { padding-left: 7px; }
+  .filter-bar { padding: 6px 10px; gap: 5px; }
+  .select-bar { padding: 5px 10px; }
+  .sort-header-bar { padding: 5px 10px; }
+}
+@media (min-width: 600px) {
+  .search-scan-row { gap: 10px; }
+  .search-scan-wrap { min-height: 44px; padding: 9px 16px; }
+  .filter-toggle-btn { width: 44px; height: 44px; }
+  .filter-bar { flex-wrap: wrap; }
 }
 
 /* ── Reduced-motion — kill pulses / spins / slide transitions ── */
