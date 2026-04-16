@@ -34,10 +34,12 @@ interface Props {
   scanRevision: number
 }
 
-/** Adds bottom padding so the last items aren't hidden behind the FAB. */
+/** Adds bottom padding so the last items aren't hidden behind the 3-FAB stack.
+ *  Stack height: 3 × 52px FAB + 2 × 12px gap = 180px, plus 80px from the nav
+ *  bottom offset. We pad 240px so even the last item scrolls clear. */
 const InnerListElement = forwardRef<HTMLDivElement, React.ComponentPropsWithoutRef<'div'>>(
   function InnerListElement(props, ref) {
-    return <div ref={ref} {...props} style={{ ...props.style, paddingBottom: 80 }} />
+    return <div ref={ref} {...props} style={{ ...props.style, paddingBottom: 240 }} />
   }
 )
 
@@ -79,10 +81,12 @@ const Row = memo(function Row({ index, style, data }: ListChildComponentProps<It
   }
 
   const { item } = entry
+  // 4px top/bottom padding => 8px visible gap between adjacent cards.
+  // Prevents the expand arrow on one card from butting against the next.
   return (
     <div style={style}>
       <MeasuredDiv index={index} onMeasure={data.setRowHeight}>
-        <div style={{ padding: '3px 14px' }}>
+        <div style={{ padding: '4px 14px' }}>
           <ItemCard
             item={item}
             displayConfig={data.displayConfig}
@@ -143,6 +147,10 @@ export default function VirtualItemList({
   }, [entries])
 
   // Called by MeasuredDiv when an item's rendered height changes (expand/collapse).
+  // CRITICAL: must call resetAfterIndex with the default `shouldForceUpdate=true`
+  // so the list re-lays out absolutely-positioned rows. Passing `false` was
+  // skipping the re-render → next card overlaps the just-resized one and the
+  // expand arrow gets hidden. The 2px dampener above prevents render loops.
   const setRowHeight = useCallback((index: number, height: number) => {
     const cur = sizeMap.current.get(index)
     if (cur !== undefined && Math.abs(cur - height) < 2) return
@@ -151,7 +159,7 @@ export default function VirtualItemList({
       resetQueued.current = true
       requestAnimationFrame(() => {
         resetQueued.current = false
-        listRef.current?.resetAfterIndex(0, false)
+        listRef.current?.resetAfterIndex(0)
       })
     }
   }, [])
