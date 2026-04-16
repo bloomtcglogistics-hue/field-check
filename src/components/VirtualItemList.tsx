@@ -4,7 +4,7 @@ import type { ListChildComponentProps } from 'react-window'
 import ItemCard from './ItemCard'
 import type { Item, DisplayConfig } from '../types'
 
-const DEFAULT_ITEM_HEIGHT = 72
+const DEFAULT_ITEM_HEIGHT = 80
 const GROUP_HEADER_HEIGHT = 36
 
 type FlatEntry =
@@ -34,6 +34,14 @@ interface Props {
   scanRevision: number
 }
 
+/** Stable key for a flat entry — item.id for items, `header:{group}` for headers.
+ *  Used for both react-window's `itemKey` (component identity) and our own
+ *  height cache (so heights survive list reordering). */
+function keyForEntry(entry: FlatEntry | undefined): string | null {
+  if (!entry) return null
+  return entry.type === 'header' ? `header:${entry.group}` : entry.item.id
+}
+
 /** Adds bottom padding so the last items aren't hidden behind the 3-FAB stack.
  *  Stack height: 3 × 52px FAB + 2 × 12px gap = 180px, plus 80px from the nav
  *  bottom offset. We pad 240px so even the last item scrolls clear. */
@@ -43,7 +51,10 @@ const InnerListElement = forwardRef<HTMLDivElement, React.ComponentPropsWithoutR
   }
 )
 
-/** Wrapper that observes its own height via ResizeObserver and reports changes. */
+/** Wrapper that observes its own height via ResizeObserver and reports changes.
+ *  CRITICAL: no pixel dampener. Every height change must propagate to the
+ *  parent so react-window can re-lay out subsequent rows. Sub-pixel drift
+ *  accumulating without reflow is exactly what produces the visible overlap. */
 function MeasuredDiv({ index, onMeasure, children }: {
   index: number
   onMeasure: (index: number, height: number) => void
@@ -53,9 +64,13 @@ function MeasuredDiv({ index, onMeasure, children }: {
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    // Synchronous initial measurement — primes the cache before the next
+    // ResizeObserver tick fires, so first paint after mount is correct.
+    const initial = el.getBoundingClientRect().height
+    if (initial > 0) onMeasure(index, initial)
     const ro = new ResizeObserver(entries => {
       const h = entries[0]?.borderBoxSize?.[0]?.blockSize ?? entries[0]?.contentRect.height
-      if (h) onMeasure(index, h)
+      if (h && h > 0) onMeasure(index, h)
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -109,8 +124,14 @@ export default function VirtualItemList({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<List>(null)
-  const sizeMap = useRef(new Map<number, number>())
-  const resetQueued = useRef(false)
+  // Height cache keyed by STABLE id (item.id or `header:{group}`), NOT by index.
+  // Index-keyed caches go stale the moment the list reorders (filter, sort,
+  // status change) and become the root cause of overlap during sort flips.
+  const sizeById = useRef(new Map<string, number>())
+  // Coalesce multiple in-frame measurements into a single resetAfterIndex call,
+  // starting from the SMALLEST changed index — anything before that is unchanged.
+  const pendingResetIdx = useRef<number | null>(null)
+  const flushScheduled = useRef(false)
   const [containerHeight, setContainerHeight] = useState(0)
 
   // Flatten grouped data into a single list of entries
@@ -135,34 +156,55 @@ export default function VirtualItemList({
     return () => ro.disconnect()
   }, [])
 
-  // Reset size cache when entries change (filter / sort / search)
+  // When entries reorder, react-window's INTERNAL size cache is keyed by
+  // index — so index 5 still holds the height of the previous item that
+  // happened to live there. Reset from 0 forces it to re-ask getItemSize
+  // for every row, which then reads our id-keyed sizeById map.
   useEffect(() => {
-    sizeMap.current.clear()
-    listRef.current?.resetAfterIndex(0)
+    listRef.current?.resetAfterIndex(0, true)
   }, [entries])
 
   const getItemSize = useCallback((index: number): number => {
-    return sizeMap.current.get(index) ??
-      (entries[index]?.type === 'header' ? GROUP_HEADER_HEIGHT : DEFAULT_ITEM_HEIGHT)
+    const entry = entries[index]
+    if (!entry) return DEFAULT_ITEM_HEIGHT
+    const key = keyForEntry(entry)!
+    const cached = sizeById.current.get(key)
+    if (cached !== undefined) return cached
+    return entry.type === 'header' ? GROUP_HEADER_HEIGHT : DEFAULT_ITEM_HEIGHT
   }, [entries])
 
-  // Called by MeasuredDiv when an item's rendered height changes (expand/collapse).
-  // CRITICAL: must call resetAfterIndex with the default `shouldForceUpdate=true`
-  // so the list re-lays out absolutely-positioned rows. Passing `false` was
-  // skipping the re-render → next card overlaps the just-resized one and the
-  // expand arrow gets hidden. The 2px dampener above prevents render loops.
+  // Called by MeasuredDiv every time a row's rendered height changes
+  // (mount, expand/collapse, check/uncheck, qty entry, note autosize, etc.).
+  //
+  // No dampener — even fractional pixel changes get propagated. The exact-
+  // equality early-exit prevents render loops without suppressing legitimate
+  // changes. Multiple measurements in the same frame coalesce into one
+  // resetAfterIndex call from the smallest changed index for efficiency.
   const setRowHeight = useCallback((index: number, height: number) => {
-    const cur = sizeMap.current.get(index)
-    if (cur !== undefined && Math.abs(cur - height) < 2) return
-    sizeMap.current.set(index, height)
-    if (!resetQueued.current) {
-      resetQueued.current = true
+    const entry = entries[index]
+    if (!entry) return
+    const key = keyForEntry(entry)!
+    const cur = sizeById.current.get(key)
+    if (cur === height) return
+    sizeById.current.set(key, height)
+
+    if (pendingResetIdx.current === null || index < pendingResetIdx.current) {
+      pendingResetIdx.current = index
+    }
+    if (!flushScheduled.current) {
+      flushScheduled.current = true
       requestAnimationFrame(() => {
-        resetQueued.current = false
-        listRef.current?.resetAfterIndex(0)
+        flushScheduled.current = false
+        const startIdx = pendingResetIdx.current ?? 0
+        pendingResetIdx.current = null
+        // shouldForceUpdate=true (default) is REQUIRED — without it, react-window
+        // updates its internal size cache but never re-runs layout, so absolutely-
+        // positioned rows below the resized one keep their stale `top` values
+        // and visibly overlap.
+        listRef.current?.resetAfterIndex(startIdx, true)
       })
     }
-  }, [])
+  }, [entries])
 
   // Scroll to scan-highlighted item
   useEffect(() => {
@@ -183,6 +225,14 @@ export default function VirtualItemList({
     pendingItemIds, conflictItemIds, scanHighlightId, scanRevision,
     setRowHeight])
 
+  // Stable React key per row — without this, react-window keys by index and
+  // recycles the same Row instance for a different item when the order changes,
+  // briefly mismatching ItemCard state with the new item before measurement
+  // catches up.
+  const itemKey = useCallback((index: number, data: ItemData): string => {
+    return keyForEntry(data.entries[index]) ?? `idx:${index}`
+  }, [])
+
   return (
     <div ref={containerRef} style={{ flex: 1, minHeight: 0 }}>
       {containerHeight > 0 && (
@@ -192,6 +242,7 @@ export default function VirtualItemList({
           itemCount={entries.length}
           itemSize={getItemSize}
           itemData={itemData}
+          itemKey={itemKey}
           width="100%"
           overscanCount={5}
           innerElementType={InnerListElement}
