@@ -1,5 +1,5 @@
 /**
- * Generates PWA icons for TCG Field Check.
+ * Generates PWA icons for CheckFlow.
  * Run: node scripts/generate-icons.cjs
  */
 const { createCanvas } = require('canvas')
@@ -7,40 +7,47 @@ const fs = require('fs')
 const path = require('path')
 
 const PUBLIC = path.join(__dirname, '..', 'public')
+const GREEN = '#16A34A'
+const WHITE = '#FFFFFF'
 
 function drawIcon(size, maskable) {
   const canvas = createCanvas(size, size)
   const ctx = canvas.getContext('2d')
 
-  // Background — always fills the entire canvas
-  ctx.fillStyle = '#16A34A'
-  ctx.fillRect(0, 0, size, size)
-
-  if (!maskable) {
-    // Slight rounding via clip path only for non-maskable (visual hint; still square PNG)
-    // (PNG has no rounded corners concept; the OS clips it. Nothing needed here.)
+  if (maskable) {
+    // Maskable: fill entire canvas — OS applies its own mask
+    ctx.fillStyle = GREEN
+    ctx.fillRect(0, 0, size, size)
+  } else {
+    // Standard: rounded-square background (iOS-style ~22% corner radius)
+    const r = size * 0.22
+    ctx.fillStyle = GREEN
+    ctx.beginPath()
+    ctx.moveTo(r, 0)
+    ctx.lineTo(size - r, 0)
+    ctx.quadraticCurveTo(size, 0, size, r)
+    ctx.lineTo(size, size - r)
+    ctx.quadraticCurveTo(size, size, size - r, size)
+    ctx.lineTo(r, size)
+    ctx.quadraticCurveTo(0, size, 0, size - r)
+    ctx.lineTo(0, r)
+    ctx.quadraticCurveTo(0, 0, r, 0)
+    ctx.closePath()
+    ctx.fill()
   }
 
-  // Safe zone: for maskable icons content must live inside the central 80%
+  // Safe zone — maskable must keep content inside central 80%
   const safeInset = maskable ? size * 0.10 : 0
   const safeSize = size - safeInset * 2
 
-  // --- TCG text ---
-  const tcgFontSize = Math.round(safeSize * 0.38)
-  ctx.fillStyle = '#FFFFFF'
+  // "CF" — bold, modern sans-serif, centered
+  const fontSize = Math.round(safeSize * 0.58)
+  ctx.fillStyle = WHITE
   ctx.textAlign = 'center'
-  ctx.textBaseline = 'alphabetic'
-  ctx.font = `bold ${tcgFontSize}px Arial, sans-serif`
-
-  // Position TCG in upper-center of safe zone
-  const tcgY = safeInset + safeSize * 0.56
-  ctx.fillText('TCG', size / 2, tcgY)
-
-  // --- FC text ---
-  const fcFontSize = Math.round(safeSize * 0.20)
-  ctx.font = `${fcFontSize}px Arial, sans-serif`
-  const fcY = tcgY + fcFontSize * 1.15
-  ctx.fillText('FC', size / 2, fcY)
+  ctx.textBaseline = 'middle'
+  ctx.font = `900 ${fontSize}px "Segoe UI", "Helvetica Neue", Arial, sans-serif`
+  // tiny downward optical nudge so the glyphs sit visually centered
+  ctx.fillText('CF', size / 2, size / 2 + size * 0.02)
 
   return canvas
 }
@@ -57,7 +64,7 @@ for (const { name, size, maskable } of variants) {
   const buffer = canvas.toBuffer('image/png')
   const outPath = path.join(PUBLIC, name)
   fs.writeFileSync(outPath, buffer)
-  console.log(`✓ ${name}  (${size}x${size}, maskable=${maskable})  → ${buffer.length} bytes`)
+  console.log(`wrote ${name}  ${size}x${size}  maskable=${maskable}  ${buffer.length} bytes`)
 }
 
 console.log('\nAll icons written to public/')
