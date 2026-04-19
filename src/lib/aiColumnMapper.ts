@@ -1,6 +1,9 @@
 import type { AIMappingResult } from '../types'
 
-const ENDPOINT = 'https://web-production-69f23.up.railway.app/parse-import'
+const ENDPOINT =
+  import.meta.env.VITE_CHECKFLOW_BACKEND_URL ||
+  'https://web-production-65679.up.railway.app/parse-import'
+const SHARED_SECRET = import.meta.env.VITE_CHECKFLOW_SHARED_SECRET
 const TIMEOUT_MS = 15_000
 
 /**
@@ -28,9 +31,18 @@ export async function aiMapColumns(
       body.user_description = userDescription.trim()
     }
 
+    const reqHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (SHARED_SECRET) {
+      reqHeaders['X-CheckFlow-Secret'] = SHARED_SECRET
+    } else if (import.meta.env.DEV) {
+      console.warn(
+        '[aiMapColumns] VITE_CHECKFLOW_SHARED_SECRET is not set — request will likely get 401',
+      )
+    }
+
     const res = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: reqHeaders,
       body: JSON.stringify(body),
       signal: ctrl.signal,
     })
