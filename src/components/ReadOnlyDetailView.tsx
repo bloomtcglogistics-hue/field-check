@@ -91,13 +91,24 @@ export default function ReadOnlyDetailView({ rfe, onBack }: Props) {
       return { ...cfg.aiFieldMap }
     }
     const m: Record<string, string> = {}
-    if (cfg.idName && cfg.idName !== cfg.descName) m[cfg.idName] = 'tag_number'
+    const idIsActuallyQty = cfg.idName && cfg.qtyNames.includes(cfg.idName)
+    if (cfg.idName && cfg.idName !== cfg.descName && !idIsActuallyQty) {
+      m[cfg.idName] = 'tag_number'
+    }
     if (cfg.descName) m[cfg.descName] = 'description'
     return m
   }, [rfe.display_config])
 
   const sizeHeader = useMemo(() => findSizeHeader(rfe.display_config), [rfe.display_config])
   const qtyColName = rfe.display_config.qtyNames[0] ?? null
+
+  const priorityOptions = useMemo(() => ({
+    forbiddenHeaders: [
+      ...rfe.display_config.qtyNames,
+      ...(sizeHeader ? [sizeHeader] : []),
+    ],
+    aiScenario: rfe.display_config.scenario,
+  }), [rfe.display_config.qtyNames, rfe.display_config.scenario, sizeHeader])
 
   const importedDate = new Date(rfe.imported_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
@@ -161,7 +172,7 @@ export default function ReadOnlyDetailView({ rfe, onBack }: Props) {
         ) : (
           ownItems.map(item => {
             const s = checkStates.get(item.id)
-            const display = getDisplayPriority(item.data, fieldMappings)
+            const display = getDisplayPriority(item.data, fieldMappings, priorityOptions)
             const primary = display.primary || item.id
             const secondary = display.secondary
             const isChecked = !!s?.checked

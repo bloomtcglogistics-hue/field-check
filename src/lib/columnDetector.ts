@@ -244,6 +244,7 @@ export function mergeAIMapping(aiResult: AIMappingResult, headers: string[]): Di
     grpName,
     aiFieldMap,
     compositeParts: Object.keys(compositeParts).length ? compositeParts : undefined,
+    scenario: aiResult.display_priority?.scenario,
   }
 
   console.group('[FieldCheck] AI column mapping merged')

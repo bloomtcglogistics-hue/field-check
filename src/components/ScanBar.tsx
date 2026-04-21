@@ -47,16 +47,22 @@ function findMatches(items: Item[], rawCode: string): MatchResult {
 
 function primaryTitleFor(item: Item, config: DisplayConfig | undefined): string {
   if (!config) return item.id
-  const { idName, descName, aiFieldMap } = config
+  const { idName, descName, aiFieldMap, qtyNames, scenario } = config
   let fieldMappings: Record<string, string>
   if (aiFieldMap && Object.keys(aiFieldMap).length > 0) {
     fieldMappings = { ...aiFieldMap }
   } else {
     fieldMappings = {}
-    if (idName && idName !== descName) fieldMappings[idName] = 'tag_number'
+    const idIsActuallyQty = idName && qtyNames.includes(idName)
+    if (idName && idName !== descName && !idIsActuallyQty) {
+      fieldMappings[idName] = 'tag_number'
+    }
     if (descName) fieldMappings[descName] = 'description'
   }
-  const display = getDisplayPriority(item.data, fieldMappings)
+  const display = getDisplayPriority(item.data, fieldMappings, {
+    forbiddenHeaders: qtyNames,
+    aiScenario: scenario,
+  })
   return display.primary || display.secondary || item.id
 }
 

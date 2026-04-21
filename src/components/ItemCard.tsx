@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
-import { getDisplayPriority } from '../lib/displayPriority'
+import { getDisplayPriority, PLACEHOLDER_TITLE } from '../lib/displayPriority'
 import type { Item, DisplayConfig } from '../types'
 
 /** Find the header that maps to a canonical field via aiFieldMap or fuzzy match. */
@@ -119,7 +119,7 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
   const isChecked = state?.checked ?? false
   const note = noteValue !== null ? noteValue : (state?.note ?? '')
 
-  const { descName, idName, ctxNames, qtyNames, aiFieldMap } = displayConfig
+  const { descName, idName, ctxNames, qtyNames, aiFieldMap, scenario } = displayConfig
 
   // Prefer the real AI field map when the RFE was AI-mapped on import. This
   // preserves the distinction between tag_number / item_code / label_number /
@@ -127,18 +127,37 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
   // item_code column still gets the "primary" slot in scenario 2).
   //
   // Fall back to a synthetic mapping from the DisplayConfig slots for older
-  // RFEs that were imported before aiFieldMap existed.
+  // RFEs that were imported before aiFieldMap existed. When synthesising,
+  // refuse to promote idName to tag_number if idName is actually listed as a
+  // quantity column — that's a misidentified-import that would otherwise put
+  // the qty value in the title.
   let fieldMappings: Record<string, string>
   if (aiFieldMap && Object.keys(aiFieldMap).length > 0) {
     fieldMappings = { ...aiFieldMap }
   } else {
     fieldMappings = {}
-    if (idName && idName !== descName) fieldMappings[idName] = 'tag_number'
+    const idIsActuallyQty = idName && qtyNames.includes(idName)
+    if (idName && idName !== descName && !idIsActuallyQty) {
+      fieldMappings[idName] = 'tag_number'
+    }
     if (descName) fieldMappings[descName] = 'description'
   }
 
-  const display = getDisplayPriority(item.data, fieldMappings)
+  // Headers that must never surface as a card title, even if mappings claim
+  // otherwise. Covers qty + size + any header mapped (via aiFieldMap) to a
+  // forbidden canonical field.
+  const sizeHeaderForBlacklist = findHeaderForCanonical(displayConfig, 'size', ['size', 'dimension', 'dim'])
+  const forbiddenHeaders = [
+    ...qtyNames,
+    ...(sizeHeaderForBlacklist ? [sizeHeaderForBlacklist] : []),
+  ]
+
+  const display = getDisplayPriority(item.data, fieldMappings, {
+    forbiddenHeaders,
+    aiScenario: scenario,
+  })
   const primaryTitle = display.primary
+  const isPlaceholder = primaryTitle === PLACEHOLDER_TITLE
   const subtitle = display.secondary ?? ''
   const tertiary = display.third ?? ''
 
@@ -148,8 +167,9 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
   const showQtyInput = qtyNum > 1
   const storedQtyFound = state?.qty_found ?? null
 
-  // Size column — used for the always-visible size pill
-  const sizeHeader = findHeaderForCanonical(displayConfig, 'size', ['size', 'dimension', 'dim'])
+  // Size column — used for the always-visible size pill (reuse the header we
+  // already resolved for the forbidden-headers blacklist).
+  const sizeHeader = sizeHeaderForBlacklist
   const sizeValue = sizeHeader ? item.data[sizeHeader] : ''
 
   // Partial / full-found state derived from qty_found vs. required quantity
@@ -279,8 +299,15 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
         {/* Content */}
         <div className="item-content" onClick={handleCheck}>
           {primaryTitle && (
-            <div className="item-primary" style={{ fontSize: 14, fontWeight: 700 }}>
-              {highlight(primaryTitle, searchQuery)}
+            <div
+              className="item-primary"
+              style={
+                isPlaceholder
+                  ? { fontSize: 13, fontWeight: 500, fontStyle: 'italic', color: 'var(--text3)' }
+                  : { fontSize: 14, fontWeight: 700 }
+              }
+            >
+              {isPlaceholder ? primaryTitle : highlight(primaryTitle, searchQuery)}
             </div>
           )}
           {subtitle && (

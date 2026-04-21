@@ -38,6 +38,11 @@ export interface DisplayConfig {
   /** Optional per-header composite spec so rendering code can surface useful
    *  sub-parts (e.g., equipment_code) instead of the ugly joined composite ID. */
   compositeParts?: Record<string, { separator: string; parts: string[] }>
+  /** Persisted backend display-priority scenario from the AI import. When
+   *  present and === 4, the card renderer skips identifier lookups entirely
+   *  and goes straight to description / placeholder — honoring the backend's
+   *  decision instead of re-deriving it from raw row data each render. */
+  scenario?: 1 | 2 | 3 | 4
 }
 
 export interface Item {
