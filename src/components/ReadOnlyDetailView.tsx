@@ -3,7 +3,7 @@ import { ArrowLeft, FileEdit, Play, FileDown, Lock, AlertTriangle, CheckCircle2,
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { generatePDFReport } from '../lib/exportReport'
-import { getDisplayPriority, isDimensionShaped } from '../lib/displayPriority'
+import { getDisplayPriority, isLabelShaped } from '../lib/displayPriority'
 import type { RFEIndex, DisplayConfig } from '../types'
 
 /** Mirrors ItemCard's size-column lookup so pills display the same value. */
@@ -178,9 +178,10 @@ export default function ReadOnlyDetailView({ rfe, onBack }: Props) {
             const isMissing = !isFound && !isPartial && isFinalized
 
             const sizeValueRaw = sizeHeader ? item.data[sizeHeader] : ''
-            // Only show the Size pill for dimension-shaped values; a label-shaped
-            // number mis-dropped into the size column is surfaced as the title.
-            const sizeValue = isDimensionShaped(sizeValueRaw) ? sizeValueRaw : ''
+            // Show any non-empty size EXCEPT a label-shaped number (surfaced as
+            // the title). Blocklisting label-shape keeps nominal sizing visible
+            // (DN50, NPS 2, Sch 40, …) — there is no Details-grid fallback here.
+            const sizeValue = (sizeValueRaw && !isLabelShaped(sizeValueRaw)) ? sizeValueRaw : ''
             const note = s?.note?.startsWith('CONFLICT:') ? null : s?.note
 
             let statusCls = 'unchecked'

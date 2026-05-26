@@ -125,12 +125,15 @@ export function getDisplayPriority(
   const descVal  = valueOrNull(itemData, descHeader)
   const sizeVal  = valueOrNull(itemData, sizeHeader)
 
-  // A label-shaped number sitting in the size column (e.g. "36893") is a
-  // mis-mapped Label, not a dimension. Promote it into the label slot so it
-  // can serve as a title identifier instead of leaking into "Size: N". Only do
-  // so when no genuine label_number value already exists for this row.
+  // A label-shaped number sitting in the size column (e.g. "36893") may be a
+  // mis-mapped Label, not a dimension. Promote it into the label slot ONLY when
+  // this document actually defines a label_number column that is empty on THIS
+  // row — i.e. the value plausibly belongs to that column. With no label column
+  // at all, a bare numeric in size is more likely a real dimension (e.g. 12000
+  // = a 12 m length), so leave it as size rather than hijacking the title.
   let labelFromSizeHeader: string | null = null
-  if (!labelVal && isLabelShaped(sizeVal)) {
+  const labelColumnHeader = findHeader(fieldMappings, THIRD_PRIORITY)
+  if (labelColumnHeader && !labelVal && isLabelShaped(sizeVal)) {
     labelVal = sizeVal
     labelFromSizeHeader = sizeHeader
   }
@@ -219,6 +222,10 @@ export function getDisplayPriority(
 /**
  * Convenience: which scenario number applies given the mappings + this row.
  * Mirrors the AI's `display_priority.scenario` so callers can reason about it.
+ *
+ * NOTE: this reports the raw mapping scenario and does NOT reflect the size→label
+ * promotion in getDisplayPriority, so it may return 4 for a row that
+ * getDisplayPriority treats as scenario 3 (promoted label). No in-repo caller.
  */
 export function getScenario(
   itemData: Record<string, string>,

@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
-import { getDisplayPriority, isDimensionShaped } from '../lib/displayPriority'
+import { getDisplayPriority, isLabelShaped } from '../lib/displayPriority'
 import type { Item, DisplayConfig } from '../types'
 
 /** Find the header that maps to a canonical field via aiFieldMap or fuzzy match. */
@@ -148,13 +148,14 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
   const showQtyInput = qtyNum > 1
   const storedQtyFound = state?.qty_found ?? null
 
-  // Size column — used for the always-visible size pill. Only show the pill for
-  // dimension-shaped values; a label-shaped number (e.g. "36893") mis-dropped
-  // into the size column is NOT a size — it's surfaced as the title instead by
-  // getDisplayPriority, so we suppress it here rather than render "Size: 36893".
+  // Size column — used for the always-visible size pill. Show any non-empty
+  // value EXCEPT a label-shaped number (e.g. "36893") mis-dropped into the size
+  // column, which getDisplayPriority surfaces as the title instead. Blocklisting
+  // label-shape (rather than allowlisting dimension-shape) keeps legitimate
+  // nominal sizing — DN50, NPS 2, Class 150, Sch 40, M12, Ø100 — visible.
   const sizeHeader = findHeaderForCanonical(displayConfig, 'size', ['size', 'dimension', 'dim'])
   const sizeValue = sizeHeader ? (item.data[sizeHeader] ?? '') : ''
-  const showSizePill = isDimensionShaped(sizeValue)
+  const showSizePill = sizeValue.trim() !== '' && !isLabelShaped(sizeValue)
 
   // Full, untruncated description for the expanded DETAILS section. The collapsed
   // title is 2-line clamped (CSS); the complete text lives here so nothing is
@@ -211,6 +212,9 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
     // Description is rendered in full as its own DETAILS field — don't dump it
     // again as a raw row (covers AI-mapped description columns ≠ descName).
     if (k === descFullHeader) return false
+    // A label-shaped size value promoted to the title shouldn't also appear as a
+    // raw size row (e.g. "36893" as both heading and a SIZE detail line).
+    if (k === sizeHeader && isLabelShaped(sizeValue) && sizeValue === primaryTitle) return false
     if (qtyNames.includes(k)) return false
     if (gridFields.includes(k)) return false
     // Hide the synthetic keys from the detail grid — they're surfaced elsewhere
@@ -301,7 +305,10 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
               {highlight(subtitle, searchQuery)}
             </div>
           )}
-          {tertiary && (
+          {/* Suppress the tertiary line while expanded when it is the description —
+              the full text already renders in the expanded "Description" block,
+              so it would otherwise appear twice (scenario 1/2). */}
+          {tertiary && !(expanded && tertiary === fullDescription) && (
             <div className="item-tertiary" style={{ fontSize: 12, color: 'var(--text3)' }}>
               {highlight(tertiary, searchQuery)}
             </div>
