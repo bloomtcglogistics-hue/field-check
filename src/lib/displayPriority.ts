@@ -24,6 +24,51 @@ const FIRST_PRIORITY: ReadonlyArray<string> = ['tag_number']
 const SECOND_PRIORITY: ReadonlyArray<string> = ['item_code', 'ic_number']
 const THIRD_PRIORITY: ReadonlyArray<string> = ['label_number']
 
+/** Canonical fields that are NEVER valid as the primary (title) field. A row
+ *  whose only candidate maps to one of these gets an empty title, never a
+ *  quantity / size / cost as its heading. */
+const FORBIDDEN_PRIMARY: ReadonlySet<string> = new Set([
+  'quantity', 'unit', 'size', 'cost', 'weight', 'price',
+])
+
+const SIZE_FIELDS: ReadonlyArray<string> = ['size', 'dimension', 'dim']
+
+/**
+ * A purely numeric value ~5–12 digits long is label-shaped (e.g. Danieli label
+ * number "36893", or the "78596" prefix of a composite asset ID) — NOT a
+ * dimension. Backends occasionally drop such a value into the size column; when
+ * that happens it must be treated as a Label identifier, never rendered as
+ * "Size: N".
+ *
+ * NOTE: the spec said "6–12 digits", but the live-evidence label (36893) and
+ * the codebase's own composite example (78596, see types/index.ts) are both
+ * 5-digit Danieli labels — a 6-digit floor would miss exactly the values we
+ * must fix. Floor lowered to 5; 4-and-under (years, small qtys) stay excluded.
+ */
+export function isLabelShaped(value: string | null | undefined): boolean {
+  if (!value) return false
+  return /^\d{5,12}$/.test(value.trim())
+}
+
+/**
+ * A value is dimension-shaped — and therefore valid for the Size badge — only
+ * when it carries a dimension token: an inch/foot mark (" '), a metric unit
+ * (mm / cm / m / in / ft), an N×M dimension, or a fraction. A bare number that
+ * is not dimension-shaped is suppressed from the Size badge.
+ */
+export function isDimensionShaped(value: string | null | undefined): boolean {
+  if (!value) return false
+  const s = value.trim()
+  if (!s) return false
+  return (
+    /["']/.test(s) ||                          // inch / foot marks
+    /\b\d+(\.\d+)?\s*(mm|cm|in|inch|inches|ft|feet|foot|m)\b/i.test(s) || // units
+    /\d\s*[x×]\s*\d/i.test(s) ||                // 2 x 4 dimensions
+    /\d+\s*\/\s*\d+/.test(s) ||                 // ascii fraction 1/2
+    /[¼½¾⅓⅔⅛⅜⅝⅞]/.test(s)                       // unicode fractions
+  )
+}
+
 /** When description is absent, fill the secondary/tertiary slots with the best
  *  available context field in this order. Keeps cards informative on Danieli
  *  shipping manifests where true descriptions don't exist. */
@@ -72,6 +117,23 @@ export function getDisplayPriority(
   const codeHeader  = findHeaderWithValue(itemData, fieldMappings, SECOND_PRIORITY)
   const labelHeader = findHeaderWithValue(itemData, fieldMappings, THIRD_PRIORITY)
   const descHeader  = findHeaderWithValue(itemData, fieldMappings, ['description'])
+  const sizeHeader  = findHeaderWithValue(itemData, fieldMappings, SIZE_FIELDS)
+
+  const tagVal   = valueOrNull(itemData, tagHeader)
+  const codeVal  = valueOrNull(itemData, codeHeader)
+  let   labelVal = valueOrNull(itemData, labelHeader)
+  const descVal  = valueOrNull(itemData, descHeader)
+  const sizeVal  = valueOrNull(itemData, sizeHeader)
+
+  // A label-shaped number sitting in the size column (e.g. "36893") is a
+  // mis-mapped Label, not a dimension. Promote it into the label slot so it
+  // can serve as a title identifier instead of leaking into "Size: N". Only do
+  // so when no genuine label_number value already exists for this row.
+  let labelFromSizeHeader: string | null = null
+  if (!labelVal && isLabelShaped(sizeVal)) {
+    labelVal = sizeVal
+    labelFromSizeHeader = sizeHeader
+  }
 
   // Hidden-but-searchable: any identifier we recognised but didn't surface.
   const allIdHeaders = [
@@ -81,28 +143,45 @@ export function getDisplayPriority(
   ].filter((h): h is string => h !== null)
 
   let primary: string | null = null
+  let primaryHeader: string | null = null
   let secondary: string | null = null
   let third: string | null = null
   const surfaced = new Set<string>()
+  const surface = (h: string | null) => { if (h) surfaced.add(h) }
 
-  if (tagHeader) {
+  // Title identifier chain: tag → item_code → label → description. We never
+  // fall through to quantity / unit / size / cost / weight (FORBIDDEN_PRIMARY),
+  // and the chain only ever pulls from identifier or description columns.
+  if (tagVal) {
     // Scenario 1: tag exists
-    primary   = valueOrNull(itemData, tagHeader);   if (tagHeader)   surfaced.add(tagHeader)
-    secondary = valueOrNull(itemData, codeHeader);  if (codeHeader)  surfaced.add(codeHeader)
-    third     = valueOrNull(itemData, descHeader);  if (descHeader)  surfaced.add(descHeader)
-  } else if (codeHeader) {
+    primary   = tagVal;   primaryHeader = tagHeader;   surface(tagHeader)
+    secondary = codeVal;  surface(codeHeader)
+    third     = descVal;  surface(descHeader)
+  } else if (codeVal) {
     // Scenario 2: item_code exists, no tag
-    primary   = valueOrNull(itemData, codeHeader);  surfaced.add(codeHeader)
-    secondary = valueOrNull(itemData, labelHeader); if (labelHeader) surfaced.add(labelHeader)
-    third     = valueOrNull(itemData, descHeader);  if (descHeader)  surfaced.add(descHeader)
-  } else if (labelHeader) {
-    // Scenario 3: only label exists
-    primary   = valueOrNull(itemData, labelHeader); surfaced.add(labelHeader)
-    secondary = valueOrNull(itemData, descHeader);  if (descHeader)  surfaced.add(descHeader)
+    primary   = codeVal;  primaryHeader = codeHeader;  surface(codeHeader)
+    secondary = labelVal; surface(labelHeader); surface(labelFromSizeHeader)
+    third     = descVal;  surface(descHeader)
+  } else if (labelVal) {
+    // Scenario 3: only label exists (possibly promoted from a mis-mapped size col)
+    primary   = labelVal; primaryHeader = labelHeader ?? labelFromSizeHeader; surface(labelHeader); surface(labelFromSizeHeader)
+    secondary = descVal;  surface(descHeader)
   } else {
     // Scenario 4: nothing but description (or nothing at all)
-    primary = valueOrNull(itemData, descHeader)
-    if (descHeader) surfaced.add(descHeader)
+    primary = descVal;    primaryHeader = descHeader;  surface(descHeader)
+  }
+
+  // Rule 1 safety net: a title must never be a quantity / unit / size / cost /
+  // weight value. The chain above can't pick one, but a synthetic or drifted
+  // field map could point an identifier slot at such a column — drop it here so
+  // the context fallback (or an empty title) takes over. The deliberately
+  // promoted size→label value is exempt.
+  if (
+    primaryHeader &&
+    primaryHeader !== labelFromSizeHeader &&
+    FORBIDDEN_PRIMARY.has(fieldMappings[primaryHeader] ?? '')
+  ) {
+    primary = null
   }
 
   // Context fallback: if description was missing (or any of the ID slots

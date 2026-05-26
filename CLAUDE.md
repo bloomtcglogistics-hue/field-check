@@ -95,3 +95,34 @@ For anything not covered here — vendor patterns, pitch-readiness gating, agent
 - `04_STACK_AND_INFRA.md`
 - `05_VENDOR_PATTERNS.md`
 - `06_PIPELINE_CONTRACT.md`
+
+## Agent trigger keywords
+
+This repo runs an asymmetric Builder/Reviewer loop. Two checkouts: /home/billy/field-check (Builder, cb alias, cyan) and /home/billy/field-check-review (Reviewer, cr alias, yellow). Recognize these keywords typed as plain messages at the prompt.
+
+### Builder keywords (cb window)
+
+ship — commit current work, push as a feature branch.
+1. Confirm pwd is /home/billy/field-check
+2. git branch --show-current — if on main, git checkout -b fix/<short-description> BEFORE anything else
+3. git status — if clean and on main, STOP and report nothing to ship
+4. git add -A && git commit -m "<concise message>" && git push -u origin HEAD
+5. Output exactly: READY FOR REVIEW: <branch-name>
+
+fix-blockers — apply Reviewer BLOCKERS to the current feature branch. User pastes the BLOCKERS section in the same message.
+1. Confirm NOT on main
+2. git log --oneline -5 — if two commits already say 'fix: address reviewer blockers', output 'LOOP 2 REACHED -- bring this to the Architect' and STOP
+3. Apply MINIMUM changes per blocker, no scope creep
+4. git add -A && git commit -m "fix: address reviewer blockers" && git push
+5. Output exactly: FIXED -- re-review branch <branch-name>
+
+### Reviewer keyword (cr window)
+
+review-build — fetch a Builder branch, diff against main, run the review checklist.
+1. Confirm pwd is /home/billy/field-check-review
+2. git checkout main && git pull --ff-only && git fetch origin
+3. If branch not named, ask which to review
+4. git diff --stat main...origin/<BRANCH> then git diff main...origin/<BRANCH>
+5. Check: UI contract violations, displayPriority rule, vendor-pattern regressions, security/secrets, perf, offline-first, Z Fold 7 layout, new dependencies
+6. Output BLOCKERS / CONCERNS / NITS / GREEN
+7. End with READY TO MERGE. or FIXES NEEDED -- paste BLOCKERS section back to Builder.

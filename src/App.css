@@ -573,9 +573,16 @@ input, textarea {
   font-weight: 700;
   color: var(--text);
   line-height: 1.25;
-  white-space: nowrap;
+  /* Collapsed title: clamp to exactly 2 lines with an ellipsis. Compact and
+     scannable. Full text lives in the expanded DETAILS "Description" field. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  /* Break long unspaced spec strings (e.g. stainless pipe codes) so they never
+     overflow horizontally on a narrow (folded ~340px) screen. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .item-subtitle {
@@ -663,6 +670,19 @@ input, textarea {
   text-transform: uppercase; letter-spacing: 0.3px;
 }
 .detail-val { font-size: 13px; color: var(--text2); flex: 1; word-break: break-word; }
+
+/* Full untruncated description in the expanded card. No clamp, no max-height,
+   no ellipsis — every character is visible. Wraps to as many lines as needed
+   and breaks long unspaced spec strings so they never overflow horizontally. */
+.detail-desc-block { display: flex; flex-direction: column; gap: 4px; }
+.detail-desc-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 
 /* Qty found input */
 .qty-found-wrap {

@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { useAppStore } from '../stores/appStore'
-import { getDisplayPriority } from '../lib/displayPriority'
+import { getDisplayPriority, isDimensionShaped } from '../lib/displayPriority'
 import type { Item, DisplayConfig } from '../types'
 
 /** Find the header that maps to a canonical field via aiFieldMap or fuzzy match. */
@@ -148,9 +148,19 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
   const showQtyInput = qtyNum > 1
   const storedQtyFound = state?.qty_found ?? null
 
-  // Size column — used for the always-visible size pill
+  // Size column — used for the always-visible size pill. Only show the pill for
+  // dimension-shaped values; a label-shaped number (e.g. "36893") mis-dropped
+  // into the size column is NOT a size — it's surfaced as the title instead by
+  // getDisplayPriority, so we suppress it here rather than render "Size: 36893".
   const sizeHeader = findHeaderForCanonical(displayConfig, 'size', ['size', 'dimension', 'dim'])
-  const sizeValue = sizeHeader ? item.data[sizeHeader] : ''
+  const sizeValue = sizeHeader ? (item.data[sizeHeader] ?? '') : ''
+  const showSizePill = isDimensionShaped(sizeValue)
+
+  // Full, untruncated description for the expanded DETAILS section. The collapsed
+  // title is 2-line clamped (CSS); the complete text lives here so nothing is
+  // permanently hidden.
+  const descFullHeader = findHeaderForCanonical(displayConfig, 'description', ['description', 'desc']) ?? (descName || null)
+  const fullDescription = descFullHeader ? (item.data[descFullHeader] ?? '').trim() : ''
 
   // Partial / full-found state derived from qty_found vs. required quantity
   const qtyFoundNum = storedQtyFound ?? 0
@@ -198,6 +208,9 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
 
   const extraFields = Object.keys(item.data).filter(k => {
     if (k === idName || k === descName) return false
+    // Description is rendered in full as its own DETAILS field — don't dump it
+    // again as a raw row (covers AI-mapped description columns ≠ descName).
+    if (k === descFullHeader) return false
     if (qtyNames.includes(k)) return false
     if (gridFields.includes(k)) return false
     // Hide the synthetic keys from the detail grid — they're surfaced elsewhere
@@ -316,9 +329,9 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
           )}
 
           {/* Always-visible Size + Qty pills (line 3) — never hidden behind expand */}
-          {(sizeValue || qtyNum > 0) && (
+          {(showSizePill || qtyNum > 0) && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
-              {sizeValue && (
+              {showSizePill && (
                 <span
                   style={{
                     fontSize: 11,
@@ -403,6 +416,15 @@ export default function ItemCard({ item, displayConfig, searchQuery, onNeedName,
       {/* Expanded detail */}
       {expanded && (
         <div className="item-detail">
+          {/* Full, untruncated description — first field, above SIZE/details.
+              Wraps freely to any number of lines; never clamped or cut. */}
+          {fullDescription && (
+            <div className="detail-desc-block">
+              <div className="detail-section-title">Description</div>
+              <div className="detail-desc-text">{highlight(fullDescription, searchQuery)}</div>
+            </div>
+          )}
+
           {/* Extra / unmapped columns */}
           {extraFields.length > 0 && (
             <>

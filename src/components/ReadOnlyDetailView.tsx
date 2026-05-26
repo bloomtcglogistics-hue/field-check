@@ -3,7 +3,7 @@ import { ArrowLeft, FileEdit, Play, FileDown, Lock, AlertTriangle, CheckCircle2,
 import { useAppStore } from '../stores/appStore'
 import { useRealtimeStore } from '../stores/realtimeStore'
 import { generatePDFReport } from '../lib/exportReport'
-import { getDisplayPriority } from '../lib/displayPriority'
+import { getDisplayPriority, isDimensionShaped } from '../lib/displayPriority'
 import type { RFEIndex, DisplayConfig } from '../types'
 
 /** Mirrors ItemCard's size-column lookup so pills display the same value. */
@@ -177,7 +177,10 @@ export default function ReadOnlyDetailView({ rfe, onBack }: Props) {
             // genuinely unknown rather than missing.
             const isMissing = !isFound && !isPartial && isFinalized
 
-            const sizeValue = sizeHeader ? item.data[sizeHeader] : ''
+            const sizeValueRaw = sizeHeader ? item.data[sizeHeader] : ''
+            // Only show the Size pill for dimension-shaped values; a label-shaped
+            // number mis-dropped into the size column is surfaced as the title.
+            const sizeValue = isDimensionShaped(sizeValueRaw) ? sizeValueRaw : ''
             const note = s?.note?.startsWith('CONFLICT:') ? null : s?.note
 
             let statusCls = 'unchecked'
